@@ -1,0 +1,1 @@
+# P2PTradeType.py
