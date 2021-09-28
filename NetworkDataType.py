@@ -1,7 +1,9 @@
 # NetworkDataType.py
 
 class Bus:
-    def __init__(self, bindex, btype, Pd, Qd, Gs, Bs, area, Vm, Va, baseKV, bzone, Vmax, Vmin):
+    def __init__(
+            self, bindex, btype, Pd, Qd, Gs, Bs, area, Vm, Va, baseKV,
+            bzone, Vmax, Vmin):
         self.bindex = bindex
         self.btpye = btype
         self.Pd = Pd
@@ -35,7 +37,9 @@ class Line:
 
 
 class Generator:
-    def __init__(self, gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase, status, Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime):
+    def __init__(
+            self, gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase,
+            status, Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime):
         self.gindex = gindex
         self.gtype = gtype
         self.location = location
