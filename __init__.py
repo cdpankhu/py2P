@@ -5,4 +5,3 @@ import NetworkLoad
 import P2PTradeType
 import TradeFunction
 import DLMP
-import NetworkDataType
