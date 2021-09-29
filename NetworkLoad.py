@@ -1,8 +1,10 @@
 # NetworkLoad.py
-import os
-import pandas
-import NetworkDataType
-import pypower.api
+from os import getcwd
+from pandas import read_csv
+from py2P.NetworkDataType import Bus, Line, Generator
+from pypower.api import case118, case14, case24_ieee_rts, case30, case300
+from pypower.api import case30Q, case30pwl, case39, case4gs, case57
+from pypower.api import case6ww, case9, case9Q, case9target
 
 
 def networkload(testsystem):
@@ -26,71 +28,72 @@ def networkload(testsystem):
 
 
 def networkload_nomatpower(testsystem):
-    filename_Node = os.getcwd()+"/data/"+testsystem+"/Node.csv"
-    filename_Generator = os.getcwd()+"/data"+testsystem+"/Generator.csv"
-    filename_Line = os.getcwd()+"/data/"+testsystem+"/Line.csv"
+    filename_Node = getcwd()+"\\data\\"+testsystem+"\\Node.csv"
+    filename_Generator = getcwd()+"\\data\\"+testsystem+"\\Generator.csv"
+    filename_Line = getcwd()+"\\data\\"+testsystem+"\\Line.csv"
 
-    busmat = pandas.read_csv(filename_Node)
+    busmat = read_csv(filename_Node)
     buses = []
-    for i in range(1, len(busmat)):
-        bindex = busmat[i, 1]
+    for i in range(0, len(busmat)):
+        bindex = busmat["Node"][i]
         btype = 0
-        Pd = busmat[i, 2]
-        Qd = busmat[i, 3]
-        Gs = busmat[i, 6]
-        Bs = busmat[i, 7]
+        Pd = busmat["Pd"][i]
+        Qd = busmat["Qd"][i]
+        Gs = busmat["Gs"][i]
+        Bs = busmat["Bs"][i]
         area = 0
         Vm = 0
         Va = 0
-        baseKV = busmat[i, 8]
+        baseKV = busmat["baseKV"][i]
         bzone = 0
-        Vmax = busmat[i, 4]
-        Vmin = busmat[i, 5]
-        buses.append(NetworkDataType.Bus(
+        Vmax = busmat["Vmax"][i]
+        Vmin = busmat["Vmin"][i]
+        buses.append(Bus(
             bindex, btype, Pd, Qd, Gs, Bs,
             area, Vm, Va, baseKV, bzone, Vmax, Vmin))
 
-    genmat = pandas.read_csv(filename_Generator)
+    genmat = read_csv(filename_Generator)
     generators = []
-    for i in range(1, len(genmat)):
-        gindex = genmat[i, 1]
-        gtype = genmat[i, 2]
-        location = genmat[i, 3]
-        Pg = genmat[i, 4]
-        Qg = genmat[i, 5]
-        Qmax = genmat[i, 6]
-        Qmin = genmat[i, 7]
-        Vg = genmat[i, 8]
-        mBase = genmat[i, 9]
-        status = genmat[i, 10]
-        Pmax = genmat[i, 11]
-        Pmin = genmat[i, 12]
-        cost = [genmat[i, 13], genmat[i, 14], genmat[i, 15]]
-        SUcost = genmat[i, 16]
-        SDcost = genmat[i, 17]
-        RU = genmat[i, 18]
-        RD = genmat[i, 19]
-        UPtime = genmat[i, 20]
-        DNtime = genmat[i, 21]
-        generators.append(NetworkDataType.Generator(
+    for i in range(0, len(genmat)):
+        gindex = genmat["gindex"][i]
+        gtype = genmat["gtype"][i]
+        location = genmat["location"][i]
+        Pg = genmat["Pg"][i]
+        Qg = genmat["Qg"][i]
+        Qmax = genmat["Qmax"][i]
+        Qmin = genmat["Qmin"][i]
+        Vg = genmat["Vg"][i]
+        mBase = genmat["mBase"][i]
+        status = genmat["status"][i]
+        Pmax = genmat["Pmax"][i]
+        Pmin = genmat["Pmin"][i]
+        cost = [
+            genmat["cost-2nd"][i], genmat["cost-1st"][i], genmat["cost-nl"][i]]
+        SUcost = genmat["SUcost"][i]
+        SDcost = genmat["SDcost"][i]
+        RU = genmat["RU"][i]
+        RD = genmat["RD"][i]
+        UPtime = genmat["UPtime"][i]
+        DNtime = genmat["Dntime"][i]
+        generators.append(Generator(
             gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase, status,
             Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime))
 
-    branchmat = pandas.read_csv(filename_Line)
+    branchmat = read_csv(filename_Line)
     lines = []
-    for i in range(1, len(branchmat)):
+    for i in range(0, len(branchmat)):
         lindex = i
-        fbus = int(branchmat[i, 2])
-        tbus = int(branchmat[i, 1])
-        r = branchmat[i, 3]
-        x = branchmat[i, 4]
-        b = branchmat[i, 5]
-        u = branchmat[i, 6]
-        buses[tbus].children.append(fbus)
-        buses[fbus].ancestor.append(tbus)
-        buses[tbus].inline.append(lindex)
-        buses[fbus].outline.append(lindex)
-        lines.append(NetworkDataType.Line(
+        fbus = int(branchmat["to"][i])
+        tbus = int(branchmat["from"][i])
+        r = branchmat["r"][i]
+        x = branchmat["x"][i]
+        b = branchmat["b"][i]
+        u = branchmat["s"][i]
+        buses[fbus-1].children.append(tbus)
+        buses[tbus-1].ancestor.append(fbus)
+        buses[tbus-1].inline.append(lindex)
+        buses[fbus-1].outline.append(lindex)
+        lines.append(Line(
             lindex, fbus, tbus, r, x, b, u))
 
     for j in range(1, len(lines)):
@@ -112,64 +115,64 @@ def networkload_matpower(testsystem, PUcorrection):
     datamat = mpc
 
     buses = []
-    for i in range(1, len(mpc["bus"])):
-        bindex = mpc["bus"][i, 1]
-        btype = mpc["bus"][i, 2]
-        Pd = mpc["bus"][i, 3]
-        Qd = mpc["bus"][i, 4]
-        Gs = mpc["bus"][i, 5]
-        Bs = mpc["bus"][i, 6]
-        area = mpc["bus"][i, 7]
-        Vm = mpc["bus"][i, 8]
-        Va = mpc["bus"][i, 9]
-        baseKV = mpc["bus"][i, 10]
-        bzone = mpc["bus"][i, 11]
-        Vmax = mpc["bus"][i, 12]
-        Vmin = mpc["bus"][i, 13]
-        buses.append(NetworkDataType.Bus(
+    for i in range(0, len(mpc["bus"])):
+        bindex = mpc["bus"][i, 0]
+        btype = mpc["bus"][i, 1]
+        Pd = mpc["bus"][i, 2]
+        Qd = mpc["bus"][i, 3]
+        Gs = mpc["bus"][i, 4]
+        Bs = mpc["bus"][i, 5]
+        area = mpc["bus"][i, 6]
+        Vm = mpc["bus"][i, 7]
+        Va = mpc["bus"][i, 8]
+        baseKV = mpc["bus"][i, 9]
+        bzone = mpc["bus"][i, 10]
+        Vmax = mpc["bus"][i, 11]
+        Vmin = mpc["bus"][i, 12]
+        buses.append(Bus(
             bindex, btype, Pd, Qd, Gs, Bs,
             area, Vm, Va, baseKV, bzone, Vmax, Vmin))
 
     generators = []
-    for i in range(1, len(mpc["gen"])):
-        gindex = i
+    for i in range(0, len(mpc["gen"])):
+        gindex = i+1
         gtype = "NotDefined"
-        location = mpc["gen"][i, 1]
-        Pg = mpc["gen"][i, 2]
-        Qg = mpc["gen"][i, 3]
-        Qmax = mpc["gen"][i, 4]
-        Qmin = mpc["gen"][i, 5]
-        Vg = mpc["gen"][i, 6]
-        mBase = mpc["gen"][i, 7]
-        status = mpc["gen"][i, 8]
-        Pmax = mpc["gen"][i, 9]
-        Pmin = mpc["gen"][i, 10]
-        cost = [mpc["gencost"][i, 5],
-                mpc["gencost"][i, 6], mpc["gencost"][i, 7]]
-        SUcost = mpc["gencost"][i, 2]
-        SDcost = mpc["gencost"][i, 3]
+        location = mpc["gen"][i, 0]
+        Pg = mpc["gen"][i, 1]
+        Qg = mpc["gen"][i, 2]
+        Qmax = mpc["gen"][i, 3]
+        Qmin = mpc["gen"][i, 4]
+        Vg = mpc["gen"][i, 5]
+        mBase = mpc["gen"][i, 6]
+        status = mpc["gen"][i, 7]
+        Pmax = mpc["gen"][i, 8]
+        Pmin = mpc["gen"][i, 9]
+        cost = [mpc["gencost"][i, 4],
+                mpc["gencost"][i, 5], mpc["gencost"][i, 6]]
+        SUcost = mpc["gencost"][i, 1]
+        SDcost = mpc["gencost"][i, 2]
         RU = 0
         RD = 0
         UPtime = 0
         DNtime = 0
-        generators.append(NetworkDataType.Generator(
+        generators.append(Generator(
             gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase, status,
             Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime))
 
     lines = []
-    for i in range(1, len(mpc["branch"])):
-        lindex = i
-        fbus = int(mpc["branch"][i, 2])
+    for i in range(0, len(mpc["branch"])):
+        lindex = i+1
+        fbus = int(mpc["branch"][i, 0])
         tbus = int(mpc["branch"][i, 1])
-        r = mpc["branch"][i, 3]/PUcorrection
-        x = mpc["branch"][i, 4]/PUcorrection
-        b = mpc["branch"][i, 5]
+        r = mpc["branch"][i, 2]/PUcorrection
+        x = mpc["branch"][i, 3]/PUcorrection
+        b = mpc["branch"][i, 4]
         u = 10000
-        buses[tbus].children.append(fbus)
-        buses[fbus].ancestor.append(tbus)
-        buses[tbus].inline.append(lindex)
-        buses[fbus].outline.append(lindex)
-        lines.append(NetworkDataType.Line(
+        buses[fbus-1].children.append(tbus)
+        buses[tbus-1].ancestor.append(fbus)
+        buses[tbus-1].inline.append(lindex)
+        buses[fbus-1].outline.append(lindex)
+        lines.append(Line(
             lindex, fbus, tbus, r, x, b, u))
 
     if testsystem == "case141_OPF":
@@ -190,30 +193,30 @@ def networkload_matpower(testsystem, PUcorrection):
 
 def matpowercase(testsystem):
     if testsystem == "case4gs":
-        return pypower.api.case4gs()
+        return case4gs()
     elif testsystem == "case6ww":
-        return pypower.api.case6ww()
+        return case6ww()
     elif testsystem == "case9":
-        return pypower.api.case9()
+        return case9()
     elif testsystem == "case9Q":
-        return pypower.api.case9Q()
+        return case9Q()
     elif testsystem == "case9target":
-        return pypower.api.case9target()
+        return case9target()
     elif testsystem == "case14":
-        return pypower.api.case14()
+        return case14()
     elif testsystem == "case24_ieee_rts":
-        return pypower.api.case24_ieee_rts()
+        return case24_ieee_rts()
     elif testsystem == "case30":
-        return pypower.api.case30()
+        return case30()
     elif testsystem == "case30pwl":
-        return pypower.api.case30pwl()
+        return case30pwl()
     elif testsystem == "case30Q":
-        return pypower.api.case30Q()
+        return case30Q()
     elif testsystem == "case39":
-        return pypower.api.case39()
+        return case39()
     elif testsystem == "case57":
-        return pypower.api.case57()
+        return case57()
     elif testsystem == "case118":
-        return pypower.api.case118()
+        return case118()
     elif testsystem == "case300":
-        return pypower.api.case300()
+        return case300()
