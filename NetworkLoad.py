@@ -39,8 +39,8 @@ def networkload_nomatpower(testsystem):
         "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Line.csv"
 
     busmat = read_csv(filename_Node)
-    buses = []
-    for i in range(0, len(busmat)):
+    buses = {}
+    for i in range(len(busmat)):
         bindex = busmat["Node"][i]
         btype = 0
         Pd = busmat["Pd"][i]
@@ -54,13 +54,16 @@ def networkload_nomatpower(testsystem):
         bzone = 0
         Vmax = busmat["Vmax"][i]
         Vmin = busmat["Vmin"][i]
-        buses.append(Bus(
-            bindex, btype, Pd, Qd, Gs, Bs,
-            area, Vm, Va, baseKV, bzone, Vmax, Vmin))
+        buses[bindex] = Bus(
+            bindex, btype, Pd, Qd, Gs, Bs, area, Vm, Va, baseKV, bzone,
+            Vmax, Vmin)
+        # buses.append(Bus(
+        #    bindex, btype, Pd, Qd, Gs, Bs,
+        #    area, Vm, Va, baseKV, bzone, Vmax, Vmin))
 
     genmat = read_csv(filename_Generator)
-    generators = []
-    for i in range(0, len(genmat)):
+    generators = {}
+    for i in range(len(genmat)):
         gindex = genmat["gindex"][i]
         gtype = genmat["gtype"][i]
         location = genmat["location"][i]
@@ -81,29 +84,34 @@ def networkload_nomatpower(testsystem):
         RD = genmat["RD"][i]
         UPtime = genmat["UPtime"][i]
         DNtime = genmat["Dntime"][i]
-        generators.append(Generator(
+        generators[gindex] = Generator(
             gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase, status,
-            Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime))
+            Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime)
+        # generators.append(Generator(
+        #    gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase, status,
+        #    Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime))
 
     branchmat = read_csv(filename_Line)
-    lines = []
-    for i in range(0, len(branchmat)):
-        lindex = i
+    lines = {}
+    for i in range(len(branchmat)):
+        lindex = i+1
         fbus = int(branchmat["to"][i])
         tbus = int(branchmat["from"][i])
         r = branchmat["r"][i]
         x = branchmat["x"][i]
         b = branchmat["b"][i]
         u = branchmat["s"][i]
-        buses[fbus-1].children.append(tbus)
-        buses[tbus-1].ancestor.append(fbus)
-        buses[tbus-1].inline.append(lindex)
-        buses[fbus-1].outline.append(lindex)
-        lines.append(Line(
-            lindex, fbus, tbus, r, x, b, u))
+        buses[fbus].children.append(tbus)
+        buses[tbus].ancestor.append(fbus)
+        buses[tbus].inline.append(lindex)
+        buses[fbus].outline.append(lindex)
+        lines[lindex] = Line(
+            lindex, fbus, tbus, r, x, b, u)
+        # lines.append(Line(
+        #    lindex, fbus, tbus, r, x, b, u))
 
-    for j in range(1, len(lines)):
-        for k in range(1, len(lines)):
+    for j in lines:
+        for k in lines:
             if lines[j].fbus == lines[k].tbus:
                 lines[j].ancestor.append(k)
             elif lines[j].tbus == lines[k].fbus:
@@ -120,8 +128,8 @@ def networkload_matpower(testsystem, PUcorrection):
     mpc = matpowercase(testsystem)
     datamat = mpc
 
-    buses = []
-    for i in range(0, len(mpc["bus"])):
+    buses = {}
+    for i in range(len(mpc["bus"])):
         bindex = mpc["bus"][i, 0]
         btype = mpc["bus"][i, 1]
         Pd = mpc["bus"][i, 2]
@@ -135,12 +143,15 @@ def networkload_matpower(testsystem, PUcorrection):
         bzone = mpc["bus"][i, 10]
         Vmax = mpc["bus"][i, 11]
         Vmin = mpc["bus"][i, 12]
-        buses.append(Bus(
-            bindex, btype, Pd, Qd, Gs, Bs,
-            area, Vm, Va, baseKV, bzone, Vmax, Vmin))
+        buses[bindex] = Bus(
+            bindex, btype, Pd, Qd, Gs, Bs, area, Vm, Va, baseKV, bzone,
+            Vmax, Vmin)
+        # buses.append(Bus(
+        #    bindex, btype, Pd, Qd, Gs, Bs,
+        #    area, Vm, Va, baseKV, bzone, Vmax, Vmin))
 
-    generators = []
-    for i in range(0, len(mpc["gen"])):
+    generators = {}
+    for i in range(len(mpc["gen"])):
         gindex = i+1
         gtype = "NotDefined"
         location = mpc["gen"][i, 0]
@@ -161,12 +172,15 @@ def networkload_matpower(testsystem, PUcorrection):
         RD = 0
         UPtime = 0
         DNtime = 0
-        generators.append(Generator(
+        generators[gindex] = Generator(
             gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase, status,
-            Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime))
+            Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime)
+        # generators.append(Generator(
+        #    gindex, gtype, location, Pg, Qg, Qmax, Qmin, Vg, mBase, status,
+        #    Pmax, Pmin, cost, SUcost, SDcost, RU, RD, UPtime, DNtime))
 
-    lines = []
-    for i in range(0, len(mpc["branch"])):
+    lines = {}
+    for i in range(len(mpc["branch"])):
         lindex = i+1
         fbus = int(mpc["branch"][i, 0])
         tbus = int(mpc["branch"][i, 1])
@@ -174,21 +188,24 @@ def networkload_matpower(testsystem, PUcorrection):
         x = mpc["branch"][i, 3]/PUcorrection
         b = mpc["branch"][i, 4]
         u = 10000
-        buses[fbus-1].children.append(tbus)
-        buses[tbus-1].ancestor.append(fbus)
-        buses[tbus-1].inline.append(lindex)
-        buses[fbus-1].outline.append(lindex)
-        lines.append(Line(
-            lindex, fbus, tbus, r, x, b, u))
+        buses[fbus].children.append(tbus)
+        buses[tbus].ancestor.append(fbus)
+        buses[tbus].inline.append(lindex)
+        buses[fbus].outline.append(lindex)
+        lines[lindex] = Line(
+            lindex, fbus, tbus, r, x, b, u)
+        # lines.append(Line(
+        #    lindex, fbus, tbus, r, x, b, u))
 
     if testsystem == "case141_OPF":
-        for j in range(1, 6):
-            lines[j].u = 50
-        for j in range(7, len(lines)):
-            lines[j].u = 5.0
+        for j in lines:
+            if lines[j].lindex < 7:
+                lines[j].u = 50
+            else:
+                lines[j].u = 5.0
 
-    for j in range(1, len(lines)):
-        for k in range(1, len(lines)):
+    for j in lines:
+        for k in lines:
             if lines[j].fbus == lines[k].tbus:
                 lines[j].ancestor.append(k)
             elif lines[j].tbus == lines[k].fbus:
