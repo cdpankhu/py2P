@@ -2,9 +2,9 @@
 from os import getcwd
 from pandas import read_csv
 from py2P.NetworkDataType import Bus, Line, Generator
-from pypower.api import case118, case14, case24_ieee_rts, case30, case300
-from pypower.api import case30Q, case30pwl, case39, case4gs, case57
-from pypower.api import case6ww, case9, case9Q, case9target
+from pypower.api import \
+    case118, case14, case24_ieee_rts, case30, case300, case30Q, case30pwl, \
+    case39, case4gs, case57, case6ww, case9, case9Q, case9target
 
 
 def networkload(testsystem):
@@ -28,9 +28,15 @@ def networkload(testsystem):
 
 
 def networkload_nomatpower(testsystem):
-    filename_Node = getcwd()+"\\data\\"+testsystem+"\\Node.csv"
-    filename_Generator = getcwd()+"\\data\\"+testsystem+"\\Generator.csv"
-    filename_Line = getcwd()+"\\data\\"+testsystem+"\\Line.csv"
+    # filename_Node = getcwd()+"\\data\\"+testsystem+"\\Node.csv"
+    # filename_Generator = getcwd()+"\\data\\"+testsystem+"\\Generator.csv"
+    # filename_Line = getcwd()+"\\data\\"+testsystem+"\\Line.csv"
+    filename_Node = \
+        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Node.csv"
+    filename_Generator = \
+        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Generator.csv"
+    filename_Line = \
+        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Line.csv"
 
     busmat = read_csv(filename_Node)
     buses = []
