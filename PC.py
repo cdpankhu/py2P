@@ -27,7 +27,7 @@ def pc(testsystem):
     root = -1
     for g in generators:
         if generators[g].gtype == "Root":
-            root = g
+            root = generators[g].location
 
     if root == -1:
         print("No generator at root node")
@@ -63,10 +63,13 @@ def pc(testsystem):
 
     # Scale of each trade in MWh
     trade_scale = 1e-3
+    # trade_scale = 1
 
     # Defining trading agents at non-root buses
     # Current definition defines a single agent of type 1 at each demand bus.
     # Current definition defines duplicate generator agents for each gen at bus
+    # May need to refactor with addition of individual assets at single bus
+    # multiple assets at single bus could act as aggregation as well???
     agents = {}
     agentID = 1
     for b in buses:
@@ -74,8 +77,6 @@ def pc(testsystem):
             agents[agentID] = Agent(
                 b, b, 1, 0, 0, [0, 0, 0], gam[b]*buses[b].Pd, gam[b]*buses[b].Qd)
             agentID += 1
-            # agents[b].append(Agent(
-            #     b, b, 1, 0, 0, [], gam[b]*buses[b].Pd, gam[b]*buses[b].Qd))
         else:
             for g in B_gn[b]:
                 if generators[g].gtype != "Root":
@@ -84,10 +85,6 @@ def pc(testsystem):
                         generators[g].cost, gam[b]*buses[b].Pd,
                         gam[b]*buses[b].Qd)
                     agentID += 1
-                    # agents[b].append(Agent(
-                    #     b, b, 1, generators[g].Pmin, generators[g].Pmax,
-                    #    generators[g].cost, gam[b]*buses[b].Pd,
-                    #    gam[b]*buses[b].Qd))
 
     # Defining trades and result matrices
     trades = generatetrade(agents, trade_scale)
@@ -196,8 +193,8 @@ def pc(testsystem):
             else:
                 trades_rest.append(w)
 
-        for i in agents:
-            dispatch[i] = ceil(agents[i].Pd/trade_scale)  # MW to kW conversion
+        # for i in agents:
+        #     dispatch[i] = ceil(agents[i].Pd/trade_scale)  # MW to kW conversion
 
         # Determine nodal operating points according to incremental trades
         for w in trades_selected:
@@ -211,5 +208,7 @@ def pc(testsystem):
         # Set generator dispatch values
         for g in gensetP:
             dispatch_peerG[g] = Generation[generators[g].location]
+
+        # SMP = generators[root].cost[1]
 
         return dispatch, GenCon, Consumption, Generation

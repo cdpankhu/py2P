@@ -1,7 +1,7 @@
 # TradeFunction.py
-from .P2PTradeType import Trade, Agent
+from .P2PTradeType import Trade
 from math import floor, ceil
-from gurobipy import *
+from gurobipy import Model, GRB
 
 
 def generatetrade(agents, trade_scale):
@@ -25,7 +25,7 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     # Trade Set W
     m = Model("selecttrade")
     m.Params.OutputFlag = 0
-    # Creat variables
+    # Create variables
     # Note, need to add constraint/variable for utility of marginal demand
     pg = m.addVar(name="pg", lb=A[agentID].pgMin, ub=A[agentID].pgMax)
     revenuesell = m.addVar(name="revenuesell")
@@ -92,9 +92,9 @@ def selecttrade(W, A, agentID, gap, trade_scale):
         tradeID += 1
     accepted = [i for i in w if w[i] == 1]
     rejected = [i for i in w if w[i] == 0]
-    pg = v[0].x
-    revenuesell = v[1].x
-    costbuy = v[2].x
-    costnetwork = v[3].x
-    costdg = v[4].x
+    pg = m.getVarByName("pg").x
+    revenuesell = m.getVarByName("revenuesell").x
+    costbuy = m.getVarByName("costbuy").x
+    costnetwork = m.getVarByName("costnetwork").x
+    costdg = m.getVarByName("costdg").x
     return accepted, rejected, pg, revenuesell, costbuy, costnetwork, costdg
