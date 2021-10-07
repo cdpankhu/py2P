@@ -34,9 +34,11 @@ def pc(testsystem):
         generators[1].gtype = "Root"
         root = 1
 
-    gensetU = generators[root]
-    gensetP = generators
-    gensetP.pop(root)
+    gensetP = []
+    gensetU = root
+    for g in generators:
+        if not g == root:
+            gensetP.append(g)
 
     # Defining the set of generator buses and demand buses
     B_g = []
@@ -62,8 +64,8 @@ def pc(testsystem):
         gam[b] = partlevel
 
     # Scale of each trade in MWh
-    trade_scale = 1e-3
-    # trade_scale = 1
+    #trade_scale = 1e-3  # trade in kWh
+    trade_scale = 1  # trade in MWh
 
     # Defining trading agents at non-root buses
     # Current definition defines a single agent of type 1 at each demand bus.
@@ -209,6 +211,7 @@ def pc(testsystem):
         for g in gensetP:
             dispatch_peerG[g] = Generation[generators[g].location]
 
-        # SMP = generators[root].cost[1]
+        SMP = generators[root].cost[1]
 
-        return dispatch, GenCon, Consumption, Generation
+        return dispatch_peerG, buses,\
+            generators, B_gn, lines, SMP, gensetP, gensetU

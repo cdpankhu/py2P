@@ -43,6 +43,8 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     obj -= costdg
     m.setObjective(obj, GRB.MAXIMIZE)
 
+    m.update()
+
     # Create constraints
     # Define revenue from sales to peers
     m.addConstr(
@@ -82,6 +84,8 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     for i in W:
         if not (W[i].As == agentID or W[i].Ab == agentID):
             m.addConstr(u[i-1] == 0)
+
+    m.update()
 
     m.optimize()
     v = m.getVars()

@@ -8,15 +8,15 @@ def calculateDLMP(
 
     # Create variables
     # Variable for voltage square
-    v = m.addVars(len(buses), lb=0, name="v")
+    v = m.addVars((b for b in buses), lb=0, name="v")
     # Variable for current square
-    a = m.addVars(len(lines), lb=0, name="a")
-    fp = m.addVars(len(lines), name="fp")
-    fq = m.addVars(len(lines), name="fq")
-    pg = m.addVars(len(generators), name="pg")
-    qg = m.addVars(len(generators), name="qg")
+    a = m.addVars((li for li in lines), lb=0, name="a")
+    fp = m.addVars((li for li in lines), name="fp")
+    fq = m.addVars((li for li in lines), name="fq")
+    pg = m.addVars((g for g in generators), name="pg")
+    qg = m.addVars((g for g in generators), name="qg")
     oc = m.addVar(lb=0, name="oc")
-    ocgen = m.addVars(len(generators), lb=0, name="ocgen")
+    ocgen = m.addVars((g for g in generators), lb=0, name="ocgen")
 
     m.update()
 
@@ -24,86 +24,93 @@ def calculateDLMP(
     obj = -oc
     m.setObjective(obj, GRB.MAXIMIZE)
 
+    m.update()
+
     # Create constraints
     # Define operating cost
-    m.addConstr(oc == sum(ocgen[g] for g in range(len(generators))), name="oc")
+    m.addConstr(oc == sum(ocgen[g] for g in generators), name="oc")
     # Define linear generation cost
     m.addConstrs(
-        (ocgen[g-1] == (generators[g].cost[1]*pg[g-1] + generators[g].cost[2])
+        (ocgen[g] == (generators[g].cost[1]*pg[g] + generators[g].cost[2])
             for g in generators), name="gencost"
     )
     m.addConstrs(
-        ((fp[li-1]*fp[li-1] + fq[li-1]*fq[li-1])
+        ((fp[li]*fp[li] + fq[li]*fq[li])
             <= lines[li].u*lines[li].u for li in lines),
         name="linecapfw"
     )
     m.addConstrs(
-        ((fp[li-1] - a[li-1]*lines[li].r)*(fp[li-1] - a[li-1]*lines[li].r)
-            + (fq[li-1] - a[li-1]*lines[li].x)*(fq[li-1] - a[li-1]*lines[li].x)
+        ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
+            + (fq[li] - a[li]*lines[li].x)*(fq[li] - a[li]*lines[li].x)
             <= (lines[li].u)*(lines[li].u) for li in lines),
         name="linecapbw"
     )
     m.addConstrs(
-        ((v[lines[li].fbus-1] - 2*(
-                lines[li].r*fp[li-1] + lines[li].x*fq[li-1]
-                + a[li-1]*(lines[li].r*lines[li].r + lines[li].x*lines[li].x)))
-            == v[lines[li].tbus-1] for li in lines),
+        ((v[lines[li].fbus] - 2*(
+                lines[li].r*fp[li] + lines[li].x*fq[li]
+                + a[li]*(lines[li].r*lines[li].r + lines[li].x*lines[li].x)))
+            == v[lines[li].tbus] for li in lines),
         name="betweennodes"
     )
+    # Second order conic constraint
     m.addConstrs(
-        ((fp[li-1]*fp[li-1] + fq[li-1]*fq[li-1])
-            <= v[lines[li].fbus-1]*a[li-1] for li in lines),
+        ((fp[li]*fp[li] + fq[li]*fq[li])
+            <= v[lines[li].fbus]*a[li] for li in lines),
         name="socp"
     )
 
     # Voltage contraint for root node
     for g in generators:
-        if generators[g].type == "Root":
-            m.addConstr(v[generators[g].location-1] == 1)
+        if generators[g].gtype == "Root":
+            m.addConstr(v[generators[g].location] == 1)
 
     m.addConstrs(
         ((
-            sum(fp[li-1] for li in buses[b].outline)
-            - sum(fp[li-1] - lines[li].r*a[li-1] for li in buses[b].inline)
-            - sum(pg[g-1] for g in B_gn[b]) + buses[b].Pd + v[b-1]*buses[b].Gs
+            sum(fp[li] for li in buses[b].outline)
+            - sum(fp[li] - lines[li].r*a[li] for li in buses[b].inline)
+            - sum(pg[g] for g in B_gn[b]) + buses[b].Pd + v[b]*buses[b].Gs
             ) == 0 for b in buses),
         name="pbalance"
     )
     m.addConstrs(
         ((
-            sum(fq[li-1] for li in buses[b].outline)
-            - sum(fp[li-1] - lines[li].x*a[li-1] for li in buses[b].inline)
-            - sum(qg[g-1] for g in B_gn[b]) + buses[b].Qd - v[b-1]*buses[b].Bs
+            sum(fq[li] for li in buses[b].outline)
+            - sum(fp[li] - lines[li].x*a[li] for li in buses[b].inline)
+            - sum(qg[g] for g in B_gn[b]) + buses[b].Qd - v[b]*buses[b].Bs
             ) == 0 for b in buses),
         name="qbalance"
     )
     m.addConstrs(
-        (v[b-1] <= buses[b].Vmax*buses[b].Vmax for b in buses),
+        (v[b] <= buses[b].Vmax*buses[b].Vmax for b in buses),
         name="vmax"
     )
     m.addConstrs(
-        (v[b-1] >= buses[b].Vmin*buses[b].Vmin for b in buses),
+        (v[b] >= buses[b].Vmin*buses[b].Vmin for b in buses),
         name="vmin"
     )
     m.addConstrs(
-        (pg[g-1] >= generators[g].Pmin for g in generators),
+        (pg[g] >= generators[g].Pmin for g in generators),
         name="pgmin"
     )
     m.addConstrs(
-        (pg[g-1] <= generators[g].Pmax for g in generators),
+        (pg[g] <= generators[g].Pmax for g in generators),
         name="pgmax"
     )
     m.addConstrs(
-        (qg[g-1] >= generators[g].Qmin for g in generators),
+        (qg[g] >= generators[g].Qmin for g in generators),
         name="qgmin"
     )
     m.addConstrs(
-        (qg[g-1] <= generators[g].Qmax for g in generators),
+        (qg[g] <= generators[g].Qmax for g in generators),
         name="qgmax"
     )
-    m.addConstrs(
-        (dispatch[g] == pg[g-1] for g in generators),
-        name="genpower"
-    )
+    # m.addConstrs(
+    #     (dispatch[g] == pg[g] for g in gensetP),
+    #     name="genpower"
+    # )
+
+    m.update()
 
     m.optimize()
+
+    return m
