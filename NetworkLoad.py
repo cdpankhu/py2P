@@ -15,16 +15,19 @@ def networkload(testsystem):
         usingMatPower = 0
     elif testsystem == "R2-25.00-1":
         usingMatPower = 0
+    elif testsystem == "Test2Bus":
+        usingMatPower = 0
     else:
         usingMatPower = 1
-        PUcorrection = 100
-        if testsystem == "case141_OPF":
-            PUcorrection = 10
+        # PUcorrection = 100
+        # if testsystem == "case141_OPF":
+        #     PUcorrection = 10
 
     if usingMatPower == 0:
         return networkload_nomatpower(testsystem)
     elif usingMatPower == 1:
-        return networkload_matpower(testsystem, PUcorrection)
+        # return networkload_matpower(testsystem, PUcorrection)
+        return networkload_matpower(testsystem)
 
 
 def networkload_nomatpower(testsystem):
@@ -95,14 +98,21 @@ def networkload_nomatpower(testsystem):
     lines = {}
     for i in range(len(branchmat)):
         lindex = i+1
-        fbus = int(branchmat["to"][i])
-        tbus = int(branchmat["from"][i])
+        # fbus = int(branchmat["to"][i])
+        # tbus = int(branchmat["from"][i])
+        # Definition of fbus is based on {Low, 2013} which is opposite matpower
+        fbus = int(branchmat["from"][i])
+        tbus = int(branchmat["to"][i])
         r = branchmat["r"][i]
         x = branchmat["x"][i]
         b = branchmat["b"][i]
         u = branchmat["s"][i]
-        buses[fbus].children.append(tbus)
-        buses[tbus].ancestor.append(fbus)
+        # buses[fbus].children.append(tbus)
+        # buses[tbus].ancestor.append(fbus)
+        # buses[tbus].inline.append(lindex)
+        # buses[fbus].outline.append(lindex)
+        buses[tbus].children.append(fbus)
+        buses[fbus].ancestor.append(tbus)
         buses[tbus].inline.append(lindex)
         buses[fbus].outline.append(lindex)
         lines[lindex] = Line(
@@ -124,7 +134,7 @@ def networkload_nomatpower(testsystem):
     return buses, lines, generators, datamat
 
 
-def networkload_matpower(testsystem, PUcorrection):
+def networkload_matpower(testsystem):
     mpc = matpowercase(testsystem)
     datamat = mpc
 
@@ -182,20 +192,27 @@ def networkload_matpower(testsystem, PUcorrection):
     lines = {}
     for i in range(len(mpc["branch"])):
         lindex = i+1
-        fbus = int(mpc["branch"][i, 0])
-        tbus = int(mpc["branch"][i, 1])
-        r = mpc["branch"][i, 2]/PUcorrection
-        x = mpc["branch"][i, 3]/PUcorrection
+        # fbus = int(mpc["branch"][i, 0])
+        # tbus = int(mpc["branch"][i, 1])
+        # Definition of fbus is based on {Low, 2013} which is opposite matpower
+        fbus = int(mpc["branch"][i, 1])
+        tbus = int(mpc["branch"][i, 0])
+        # r = mpc["branch"][i, 2]/PUcorrection
+        # x = mpc["branch"][i, 3]/PUcorrection
+        r = mpc["branch"][i, 2]
+        x = mpc["branch"][i, 3]
         b = mpc["branch"][i, 4]
         u = 10000
-        buses[fbus].children.append(tbus)
-        buses[tbus].ancestor.append(fbus)
+        # buses[fbus].children.append(tbus)
+        # buses[tbus].ancestor.append(fbus)
+        # buses[tbus].inline.append(lindex)
+        # buses[fbus].outline.append(lindex)
+        buses[tbus].children.append(fbus)
+        buses[fbus].ancestor.append(tbus)
         buses[tbus].inline.append(lindex)
         buses[fbus].outline.append(lindex)
         lines[lindex] = Line(
             lindex, fbus, tbus, r, x, b, u)
-        # lines.append(Line(
-        #    lindex, fbus, tbus, r, x, b, u))
 
     if testsystem == "case141_OPF":
         for j in lines:
@@ -206,6 +223,10 @@ def networkload_matpower(testsystem, PUcorrection):
 
     for j in lines:
         for k in lines:
+            # if lines[j].fbus == lines[k].tbus:
+            #     lines[j].ancestor.append(k)
+            # elif lines[j].tbus == lines[k].fbus:
+            #     lines[j].children.append(k)
             if lines[j].fbus == lines[k].tbus:
                 lines[j].ancestor.append(k)
             elif lines[j].tbus == lines[k].fbus:

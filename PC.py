@@ -64,8 +64,8 @@ def pc(testsystem):
         gam[b] = partlevel
 
     # Scale of each trade in MWh
-    #trade_scale = 1e-3  # trade in kWh
-    trade_scale = 1  # trade in MWh
+    trade_scale = 1e-3  # trade in kWh
+    #trade_scale = 1  # trade in MWh
 
     # Defining trading agents at non-root buses
     # Current definition defines a single agent of type 1 at each demand bus.
