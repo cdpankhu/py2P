@@ -1,7 +1,6 @@
 # PC.py
 import gurobipy
 from pandas import DataFrame
-from numpy import zeros
 from py2P.NetworkDataType import Bus, Line, Generator
 from py2P.P2PTradeType import Trade, Agent
 from py2P.NetworkLoad import networkload
