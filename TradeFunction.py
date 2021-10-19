@@ -32,7 +32,7 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     costbuy = m.addVar(name="costbuy")
     costnetwork = m.addVar(name="costnetwork")
     costdg = m.addVar(name="costdg")
-    u = m.addVars(len(W), vtype=GRB.BINARY, name="u")
+    u = m.addVars((w for w in W), vtype=GRB.BINARY, name="u")
 
     m.update()
 
@@ -49,17 +49,17 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     # Define revenue from sales to peers
     m.addConstr(
         revenuesell
-        == sum(W[i].Pes * u[i-1] for i in W if W[i].As == agentID),
+        == sum(W[i].Pes * u[i] for i in W if W[i].As == agentID),
         "c0")
     # Define cost of purchasing from peers
     m.addConstr(
-        costbuy == sum(W[i].Peb * u[i-1] for i in W if W[i].Ab == agentID),
+        costbuy == sum(W[i].Peb * u[i] for i in W if W[i].Ab == agentID),
         "c1")
     # Define cost of network on transactions
     m.addConstr(
         costnetwork == trade_scale * (
-            sum(W[i].costNw * u[i-1] for i in W if W[i].Ab == agentID)
-            + sum(W[i].costNw * u[i-1] for i in W if W[i].As == agentID)),
+            sum(W[i].costNw * u[i] for i in W if W[i].Ab == agentID)
+            + sum(W[i].costNw * u[i] for i in W if W[i].As == agentID)),
         "c2")
     # Define cost of DG generation operation
     m.addConstr(
@@ -71,19 +71,19 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     # Require that power from Dg is equal to the sum of selling trades
     # Need to make sure trading to oneself is okay!
     m.addConstr(
-        pg/trade_scale == sum(u[i-1] for i in W if W[i].As == agentID),
+        pg/trade_scale == sum(u[i] for i in W if W[i].As == agentID),
         "c4")
     # Requires that the peer demand is equal to the sum of purchased trades
     # Currently Pd is fixed, no marginal value of additional demand. FIX!!!
     m.addConstr(
         floor(A[agentID].Pd/trade_scale)
-        == sum(u[i-1] for i in W if W[i].Ab == agentID),
+        == sum(u[i] for i in W if W[i].Ab == agentID),
         "c5")
 
     # Run optimization
     for i in W:
         if not (W[i].As == agentID or W[i].Ab == agentID):
-            m.addConstr(u[i-1] == 0)
+            m.addConstr(u[i] == 0)
 
     m.update()
 

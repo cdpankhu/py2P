@@ -7,6 +7,7 @@ from pandas import DataFrame
 def calculatedlmp(
         dispatch, buses, generators, lines, SMP, gensetP, gensetU):
 
+    # Consider reducing cyclomatic complexity by moving shadow price extraction
     B_gn = {}
     for i in buses:
         B_gn[i] = []

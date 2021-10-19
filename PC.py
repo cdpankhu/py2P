@@ -5,6 +5,7 @@ from py2P.NetworkDataType import Bus, Line, Generator
 from py2P.P2PTradeType import Trade, Agent
 from py2P.NetworkLoad import networkload
 from py2P.TradeFunction import generatetrade, selecttrade
+from py2P.DLMP import calculatedlmp
 from math import ceil
 
 
@@ -64,7 +65,7 @@ def pc(testsystem):
 
     # Scale of each trade in MWh
     trade_scale = 1e-3  # trade in kWh
-    #trade_scale = 1  # trade in MWh
+    # trade_scale = 1  # trade in MWh
 
     # Defining trading agents at non-root buses
     # Current definition defines a single agent of type 1 at each demand bus.
@@ -76,7 +77,8 @@ def pc(testsystem):
     for b in buses:
         if not B_gn[b]:
             agents[agentID] = Agent(
-                b, b, 1, 0, 0, [0, 0, 0], gam[b]*buses[b].Pd, gam[b]*buses[b].Qd)
+                b, b, 1, 0, 0, [0, 0, 0], gam[b]*buses[b].Pd,
+                gam[b]*buses[b].Qd)
             agentID += 1
         else:
             for g in B_gn[b]:
@@ -99,14 +101,14 @@ def pc(testsystem):
             trades_mat[i, j] = []
             trades_mat_buy[i, j] = []
             trades_mat_sell[i, j] = []
-    trade_selected_mat = {}
-    trade_selected_mat_buy = {}
-    trade_selected_mat_sell = {}
+    trades_selected_mat = {}
+    trades_selected_mat_buy = {}
+    trades_selected_mat_sell = {}
     for i in buses:
         for j in buses:
-            trade_selected_mat[i, j] = []
-            trade_selected_mat_buy[i, j] = []
-            trade_selected_mat_sell[i, j] = []
+            trades_selected_mat[i, j] = []
+            trades_selected_mat_buy[i, j] = []
+            trades_selected_mat_sell[i, j] = []
     for w in trades:
         trades_mat[trades[w].As, trades[w].Ab].append(trades[w].tradeID)
 
@@ -115,21 +117,21 @@ def pc(testsystem):
     trades_selected_old = []
     trades_rest_old = []
     dispatch = {}
-    GenCon = {}
-    Generation = {}
-    Consumption = {}
-    GenCon_old = {}
+    gencon = {}
+    generation = {}
+    consumption = {}
+    gencon_old = {}
     dispatch_old = {}
     for i in buses:
         dispatch[i] = 0
-        GenCon[i] = 0
-        Generation[i] = 0
-        Consumption[i] = 0
-        GenCon_old[i] = 0
+        gencon[i] = 0
+        generation[i] = 0
+        consumption[i] = 0
+        gencon_old[i] = 0
         dispatch_old[i] = 0
     status = 0
-    DLMP = {}
-    DLMP_stack = []
+    dlmp = {}
+    dlmp_stack = []
     dispatch_stack = []
     DLMPInfo = DataFrame()
     NodeInfo = DataFrame()
@@ -141,6 +143,7 @@ def pc(testsystem):
 
     # need to add timer code for performance assessment
     while True:
+        print("Outer loop")
         accepted = {}
         rejected = {}
         pg = {}
@@ -154,6 +157,7 @@ def pc(testsystem):
             trades[w].Pes = 0
             trades[w].Peb = 0
         while True:
+            print("Inner loop")
             accepted = {}
             rejected = {}
             pg = {}
@@ -194,23 +198,192 @@ def pc(testsystem):
             else:
                 trades_rest.append(w)
 
-        # for i in agents:
-        #     dispatch[i] = ceil(agents[i].Pd/trade_scale)  # MW to kW conversion
-
         # Determine nodal operating points according to incremental trades
         for w in trades_selected:
             dispatch[agents[trades[w].Ab].location] -= 1 * trade_scale
             dispatch[agents[trades[w].As].location] += 1 * trade_scale
-            GenCon[agents[trades[w].Ab].location] -= 1 * trade_scale
-            GenCon[agents[trades[w].As].location] += 1 * trade_scale
-            Consumption[agents[trades[w].Ab].location] -= 1 * trade_scale
-            Generation[agents[trades[w].As].location] += 1 * trade_scale
+            gencon[agents[trades[w].Ab].location] -= 1 * trade_scale
+            gencon[agents[trades[w].As].location] += 1 * trade_scale
+            consumption[agents[trades[w].Ab].location] -= 1 * trade_scale
+            generation[agents[trades[w].As].location] += 1 * trade_scale
 
         # Set generator dispatch values
         for g in gensetP:
-            dispatch_peerG[g] = Generation[generators[g].location]
+            dispatch_peerG[g] = generation[generators[g].location]
 
+        # Calculate network charge
         SMP = generators[root].cost[1]
+        print(generation, consumption)
+        status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo = \
+            calculatedlmp(
+                dispatch_peerG, buses, generators, lines, SMP, gensetP, gensetU
+                )
 
-        return dispatch_peerG, buses,\
-            generators, B_gn, lines, SMP, gensetP, gensetU
+        # Update network charge
+        deltaNw = trade_scale
+        if status == 2:
+            for w in trades:
+                if w in trades_selected:
+                    trades[w].costNw = (
+                        dlmp[agents[trades[w].Ab].location]
+                        - dlmp[agents[trades[w].As].location])/2
+        else:
+            for w in trades_selected:
+                trades[w].costNw += param_delta*deltaNw/trade_scale
+
+        dispatch_stack.append(dispatch)
+        dlmp_stack.append(dlmp)
+
+        if gencon_old == gencon and status == 2:
+            break
+        else:
+            for d in dispatch:
+                dispatch_old[d] = dispatch[d]
+            for g in gencon:
+                gencon_old[g] = gencon[g]
+
+    trades_dis = {}
+    nwcharge_dis = {}
+    echarge_dis = {}
+    for i in buses:
+        for j in buses:
+            trades_dis[i, j] = 0
+            nwcharge_dis[i, j] = 0
+            echarge_dis[i, j] = 0
+    temp = {}
+    for b in buses:
+        temp[b] = []
+
+    for w in trades_selected:
+        trades_dis[agents[trades[w].Ab].location,
+                   agents[trades[w].As].location] -= trade_scale
+        trades_dis[agents[trades[w].As].location,
+                   agents[trades[w].Ab].location] += trade_scale
+        echarge_dis[agents[trades[w].Ab].location,
+                    agents[trades[w].As].location] -= trades[w].Peb
+        echarge_dis[agents[trades[w].As].location,
+                    agents[trades[w].Ab].location] += trades[w].Pes
+        nwcharge_dis[agents[trades[w].Ab].location,
+                     agents[trades[w].As].location] \
+            -= round(trades[w].costNw, 4)
+        nwcharge_dis[agents[trades[w].As].location,
+                     agents[trades[w].Ab].location] \
+            += round(trades[w].costNW, 4)
+        temp[agents[trades[w].Ab].location].append(w)
+        temp[agents[trades[w].As].location].append(w)
+
+    price_mat = {}
+    nprice_mat = {}
+    pricemin = {}
+    pricemax = {}
+    nprice_mat_min = {}
+    nprice_mat_max = {}
+    eprice_mat = {}
+    eprice_mat_min = {}
+    eprice_mat_max = {}
+    for i in buses:
+        for j in buses:
+            price_mat[i, j] = 0
+            nprice_mat[i, j] = 0
+            pricemin[i, j] = 0
+            pricemax[i, j] = 0
+            nprice_mat_min[i, j] = 0
+            nprice_mat_max[i, j] = 0
+            eprice_mat[i, j] = 0
+            eprice_mat_min[i, j] = 0
+            eprice_mat_max[i, j] = 0
+
+    for w in trades_selected:
+        trades_selected_mat[agents[trades[w].As].location,
+                            agents[trades[w].Ab].location].append(
+                            trades[w].tradeID)
+
+    for i in buses:
+        for j in buses:
+            temp_mat = []
+            for w in trades_selected_mat[i, j]:
+                temp_mat.append(trades[w].Pes)
+                pricemin[i, j] = min(temp_mat)
+                pricemin[j, i] = -min(temp_mat)
+                pricemax[i, j] = max(temp_mat)
+                pricemax[j, i] = max(temp_mat)
+                if pricemin[i, j] == pricemax[i, j]:
+                    price_mat[i, j] = pricemin[i, j]
+                    price_mat[j, i] = -pricemin[i, j]
+                else:
+                    print("error: pricemin != pricemax")
+
+    for w in trades_selected:
+        nprice_mat[agents[trades[w].Ab].location,
+                   agents[trades[w].As].location] \
+            = 0.5*round(trades[w].costNw, 5)
+        nprice_mat[agents[trades[w].As].location,
+                   agents[trades[w].Ab].location] \
+            = 0.5*round(trades[w].costNw, 5)
+
+    for w in trades:
+        nprice_mat_min[agents[trades[w].Ab].location,
+                       agents[trades[w].As].location] \
+            = min(round(trades[w].costNW, 5),
+                  nprice_mat_min[agents[trades[w].Ab].location,
+                                 agents[trades[w].As].location])
+        nprice_mat_min[agents[trades[w].As].location,
+                       agents[trades[w].Ab].location] \
+            = min(round(trades[w].costNw, 5),
+                  nprice_mat_min[agents[trades[w].As].location,
+                                 agents[trades[w].Ab].location])
+        nprice_mat_max[agents[trades[w].Ab].location,
+                       agents[trades[w].As].location] \
+            = max(round(trades[w].costNW, 5),
+                  nprice_mat_max[agents[trades[w].Ab].location,
+                                 agents[trades[w].As].location])
+        nprice_mat_max[agents[trades[w].As].location,
+                       agents[trades[w].Ab].location] \
+            = max(round(trades[w].costNw, 5),
+                  nprice_mat_max[agents[trades[w].As].location,
+                                 agents[trades[w].Ab].location])
+
+    for w in trades_selected:
+        eprice_mat[agents[trades[w].Ab].location,
+                   agents[trades[w].As].location] = round(trades[w].Pes, 5)
+        eprice_mat[agents[trades[w].As].location,
+                   agents[trades[w].Ab].location] = round(trades[w].Peb, 5)
+
+    for w in trades:
+        eprice_mat_min[agents[trades[w].Ab].location,
+                       agents[trades[w].As].location] \
+            = min(round(trades[w].Pes, 5),
+                  eprice_mat_min[agents[trades[w].Ab].location,
+                                 agents[trades[w].As].location])
+        eprice_mat_min[agents[trades[w].As].location,
+                       agents[trades[w].Ab].location] \
+            = min(round(trades[w].Pes, 5),
+                  eprice_mat_min[agents[trades[w].As].location,
+                                 agents[trades[w].Ab].location])
+        eprice_mat_max[agents[trades[w].Ab].location,
+                       agents[trades[w].As].location] \
+            = max(round(trades[w].Pes, 5),
+                  eprice_mat_max[agents[trades[w].Ab].location,
+                                 agents[trades[w].As].location])
+        eprice_mat_max[agents[trades[w].As].location,
+                       agents[trades[w].Ab].location] \
+            = max(round(trades[w].Pes, 5),
+                  eprice_mat_max[agents[trades[w].As].location,
+                                 agents[trades[w].Ab].location])
+
+    peer_revenue = {}
+    # Base code may multiply by 2, to confirm
+    # I would think this will return a revenue of 0 since Pes = Peb
+    for i in buses:
+        peer_revenue[i] = 0
+        for j in buses:
+            peer_revenue[i] += echarge_dis[i, j]
+
+    consumer_cost = 0
+    generator_revenue = 0
+    for b in B_d:
+        consumer_cost -= peer_revenue[b]
+    for b in B_g:
+        generator_revenue += peer_revenue[b]
+
+    return consumer_cost, generator_revenue
