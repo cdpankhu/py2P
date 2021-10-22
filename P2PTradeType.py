@@ -1,7 +1,7 @@
 # P2PTradeType.py
 
 class Trade:
-    def __init__(self, tradeID, kind, Pes, Peb, As, Ab, costNw):
+    def __init__(self, tradeID, kind, Pes, Peb, As, Ab, costNw, penalty):
         self.tradeID = tradeID
         self.kind = kind
         self.Pes = Pes
@@ -9,6 +9,7 @@ class Trade:
         self.As = As
         self.Ab = Ab
         self.costNw = costNw
+        self.penalty = penalty
 
 
 class Agent:
@@ -20,4 +21,4 @@ class Agent:
         self.pgMax = pgMax
         self.costFn = costFn
         self.Pd = Pd
-        self. Qd = Qd
+        self.Qd = Qd

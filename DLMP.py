@@ -366,11 +366,12 @@ def calculatedlmp(
         a[li] = round(a[li], 3)
         fp[li] = round(fp[li], 3)
         fq[li] = round(fq[li], 3)
-    LineInfo = DataFrame([flow, a, fp, fq], index=['flow', 'i', 'pq', 'fq'])
+    LineInfo = DataFrame([flow, a, fp, fq], index=['flow', 'i', 'fp', 'fq'])
     print("::LineInfo::\n", LineInfo, "\n\n")
 
+    dlmpp = {}
     for b in buses:
-        dlmp[b] = round(dlmp[b], 2)
+        dlmpp[b] = round(dlmp[b], 2)
         eq40[b] = round(eq40[b], 2)
         eq41[b] = round(eq41[b], 2)
         eq42[b] = round(eq42[b], 2)
@@ -381,4 +382,6 @@ def calculatedlmp(
                                 "eq44"])
     print("::DLMPInfo::\n", DLMPInfo, "\n\n")
 
-    return status, dlmp, pg, NodeInfo, LineInfo, DLMPInfo
+    GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
+
+    return status, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo

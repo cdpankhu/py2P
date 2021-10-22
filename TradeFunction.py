@@ -15,7 +15,7 @@ def generatetrade(agents, trade_scale):
                 ceil(agents[b].Pd/trade_scale))
             # +1 since range is < max
             for k in range(1, up+1):
-                w = Trade(tradeID, 1, 0.0, 0.0, s, b, 0)
+                w = Trade(tradeID, 1, 0.0, 0.0, s, b, 0, 0)
                 trades[tradeID] = w
                 tradeID += 1
     return trades
