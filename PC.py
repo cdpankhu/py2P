@@ -1,15 +1,10 @@
 # PC.py
-import gurobipy
 from pandas import DataFrame
-from py2P.NetworkDataType import Bus, Line, Generator
-from py2P.P2PTradeType import Trade, Agent
+from py2P.P2PTradeType import Agent
 from py2P.NetworkLoad import networkload
 from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
-from math import ceil, pow, sqrt
-
-
-testsystem = "AP15busDN"
+from math import pow, sqrt
 
 
 def pc(testsystem):
@@ -230,8 +225,7 @@ def pc(testsystem):
 
         # Calculate network charge
         SMP = generators[root].cost[1]
-        # return dispatch_peerG, buses, generators, lines, SMP, gensetP, gensetU
-        print(dispatch_peerG, generation, consumption)
+        # print(dispatch_peerG, generation, consumption)
         status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
             calculatedlmp(
                 dispatch_peerG, buses, generators, lines, SMP, gensetP, gensetU
@@ -240,28 +234,23 @@ def pc(testsystem):
         # Update network charge
         deltaNw = trade_scale
         if status == 2:
-            # On first iteration, initialize all trades, even those not optimal
-            # if feascount == 0:
-            #     for w in trades_rest:
-            #         trades[w].costNw = (
-            #             dlmp[agents[trades[w].Ab].location]
-            #             - dlmp[agents[trades[w].As].location])/2
             # For all trades in the feasible set, update network charge
             for w in trades_selected:
                 trades[w].costNw = (
                     dlmp[agents[trades[w].Ab].location]
                     - dlmp[agents[trades[w].As].location])/2
-                trades[w].penalty = 0
+                # trades[w].penalty = 0
             feascount += 1
         else:
             # For all trades in the infeasible set, inccrement network charge
             for w in trades_selected:
-                trades[w].costNw += (pow(2, trades[w].penalty)
-                                     )*deltaNw/trade_scale
-                trades[w].penalty = + 1
+                # trades[w].costNw += (pow(2, trades[w].penalty)
+                #                      )*deltaNw/trade_scale
+                # trades[w].penalty = + 1
+                trades[w].costNw += param_delta*deltaNw/trade_scale
 
-        for w in trades:
-            print(trades[w].costNw)
+        # for w in trades:
+        #     print(trades[w].costNw)
 
         dispatch_stack.append(dispatch)
         dlmp_stack.append(dlmp)
@@ -274,9 +263,6 @@ def pc(testsystem):
                 dispatch_old[d] = dispatch[d]
             for g in gencon:
                 gencon_old[g] = gencon[g]
-
-        # Remove, breaking for debug of end code
-        break
 
     trades_dis = {}
     nwcharge_dis = {}
@@ -454,12 +440,12 @@ def pc(testsystem):
 
     for m in B_d:
         demand_P2P[m] = sum(trades_dis[n, m] for n in B_g)
-        ep_u[m] = (buses[m].Pd - demand_P2P[m])*dlmp[m]
+        ep_u[m] = (buses[m].Pd - demand_P2P[m])*dlmp[m]*trade_scale
 
     for w in trades_selected:
-        ep_p[agents[trades[w].Ab].location] += trades[w].Pes
-        nuc[agents[trades[w].Ab].location] += 0.5*trades[w].costNw
-        nuc[agents[trades[w].As].location] += 0.5*trades[w].costNw
+        ep_p[agents[trades[w].Ab].location] += trades[w].Pes*trade_scale
+        nuc[agents[trades[w].Ab].location] += 0.5*trades[w].costNw*trade_scale
+        nuc[agents[trades[w].As].location] += 0.5*trades[w].costNw*trade_scale
 
     ur = {}
     cp = {}
@@ -520,4 +506,4 @@ def pc(testsystem):
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
 
-    return consumer_cost, generator_revenue, dispatch_stack, dlmp_stack
+    return dispatch_stack, dlmp_stack

@@ -128,7 +128,7 @@ def calculatedlmp(
 
     status = m.Status
     if not (status == GRB.OPTIMAL):
-        return status, {}, {}, {}, {}, {}
+        return status, {}, {}, {}, {}, {}, {}
 
     var = m.getVars()
 
