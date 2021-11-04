@@ -4,6 +4,7 @@ from py2P.P2PTradeType import Agent
 from py2P.NetworkLoad import networkload
 from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
+from py2P.Coefficients import calculateptdf
 from math import pow, sqrt
 from gurobipy import Model, GRB
 
@@ -64,6 +65,8 @@ def sc(testsystem):
         for k in buses:
             pbd[b, k] = 0
 
+    sbase = generators[1].mBase
+
     m = Model()
 
     v = m.addVars((b for b in buses), lb=0, name="v")
@@ -99,14 +102,15 @@ def sc(testsystem):
     m.addConstrs((sum(pg[g] for g in B_gn[n]
                       if not (g in gensetU)) == p[n] for n in B_g),
                  name='genpower')
-    m.addConstrs(((-gam[n]) * buses[n].Pd == p[n] for n in B_d), name='demand')
+    m.addConstrs(((-gam[n]) * buses[n].Pd/sbase == p[n]
+                  for n in B_d), name='demand')
 
     m.addConstr((oc == sum(ocgen[g] for g in generators)),
                 name='operatingcost')
 
     # Polynomial generation cost, single order
     m.addConstrs(
-        (ocgen[g] == (generators[g].cost[1]*pg[g] + generators[g].cost[2])
+        (ocgen[g] == (generators[g].cost[1]*pg[g]*sbase + generators[g].cost[2])
             for g in generators), name="gencost"
     )
 
@@ -146,7 +150,8 @@ def sc(testsystem):
         ((
             sum(fp[li] for li in buses[b].outline)
             - sum(fp[li] - lines[li].r*a[li] for li in buses[b].inline)
-            - sum(pg[g] for g in B_gn[b]) + buses[b].Pd + v[b]*buses[b].Gs
+            - sum(pg[g] for g in B_gn[b])
+            + buses[b].Pd/sbase + v[b]*buses[b].Gs
             ) == 0 for b in buses),
         name="pbalance"
     )
@@ -155,7 +160,8 @@ def sc(testsystem):
         ((
             sum(fq[li] for li in buses[b].outline)
             - sum(fq[li] - lines[li].x*a[li] for li in buses[b].inline)
-            - sum(qg[g] for g in B_gn[b]) + buses[b].Qd - v[b]*buses[b].Bs
+            - sum(qg[g] for g in B_gn[b])
+            + buses[b].Qd/sbase - v[b]*buses[b].Bs
             ) == 0 for b in buses),
         name="qbalance"
     )
@@ -168,19 +174,19 @@ def sc(testsystem):
         name="vmin"
     )
     m.addConstrs(
-        (pg[g] >= generators[g].Pmin for g in generators),
+        (pg[g] >= generators[g].Pmin/sbase for g in generators),
         name="pgmin"
     )
     m.addConstrs(
-        (pg[g] <= generators[g].Pmax for g in generators),
+        (pg[g] <= generators[g].Pmax/sbase for g in generators),
         name="pgmax"
     )
     m.addConstrs(
-        (qg[g] >= generators[g].Qmin for g in generators),
+        (qg[g] >= generators[g].Qmin/sbase for g in generators),
         name="qgmin"
     )
     m.addConstrs(
-        (qg[g] <= generators[g].Qmax for g in generators),
+        (qg[g] <= generators[g].Qmax/sbase for g in generators),
         name="qgmax"
     )
     m.Params.QCPDual = 1
@@ -205,19 +211,19 @@ def sc(testsystem):
         varCount += 1
     fp = {}
     for li in lines:
-        fp[li] = var[varCount].x
+        fp[li] = var[varCount].x*sbase
         varCount += 1
     fq = {}
     for li in lines:
-        fq[li] = var[varCount].x
+        fq[li] = var[varCount].x*sbase
         varCount += 1
     pg = {}
     for g in generators:
-        pg[g] = var[varCount].x
+        pg[g] = var[varCount].x*sbase
         varCount += 1
     qg = {}
     for g in generators:
-        qg[g] = var[varCount].x
+        qg[g] = var[varCount].x*sbase
         varCount += 1
     oc = var[varCount].x
     varCount += 1
@@ -227,13 +233,13 @@ def sc(testsystem):
         varCount += 1
     p = {}
     for b in buses:
-        p[b] = var[varCount].x
+        p[b] = var[varCount].x*sbase
         varCount += 1
     pnm = {}
     for i in buses:
         for j in buses:
             if abs(var[varCount].x) > 1e-3:
-                pnm[i, j] = var[varCount].x
+                pnm[i, j] = var[varCount].x*sbase
             else:
                 pnm[i, j] = 0
             varCount += 1
@@ -357,4 +363,14 @@ def sc(testsystem):
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
 
-    return dispatch, dlmp, pnm, lines, buses
+    ######
+    ptdf = calculateptdf(lines, buses, root)
+    flows = {}
+    for li in lines:
+        flows[li] = 0
+        for b in buses:
+            for k in buses:
+                if pnm[b, k] > 0:
+                    flows[li] += pnm[b, k] * ptdf[li, b, k]
+
+    return dispatch, dlmp, pnm, lines, buses, flows, ptdf

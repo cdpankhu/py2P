@@ -10,14 +10,18 @@ def calculateptdf(lines, buses, root):
     lineb = []
     linea = zeros([numlines, numbus])
     for li in lines:
-        lineb.append(lines[li].b)
-        linea[li-1, lines[li].fbus-1] = 1
-        linea[li-1, lines[li].tbus-1] = -1
+        lineb.append(1/lines[li].x)
+        linea[li-1, lines[li].tbus-1] = 1
+        linea[li-1, lines[li].fbus-1] = -1
 
     lineat = transpose(linea)
     bdiag = diag(lineb)
     bmat = dot(dot(lineat, bdiag), linea)
+    bmat[root-1, :] = 0
+    bmat[:, root-1] = 0
+    bmat[root-1, root-1] = 1
     bmatinv = inv(bmat)
+    bmatinv[root-1, root-1] = 0
     isf = dot(dot(bdiag, linea), bmatinv)
 
     ptdf = {}

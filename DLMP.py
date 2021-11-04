@@ -14,6 +14,8 @@ def calculatedlmp(
     for g in generators:
         B_gn[generators[g].location].append(g)
 
+    sbase = generators[1].mBase
+
     m = Model()
     # Create variables
     # Variable for voltage square
@@ -40,7 +42,7 @@ def calculatedlmp(
     m.addConstr(oc == sum(ocgen[g] for g in generators), name="oc")
     # Define linear generation cost
     m.addConstrs(
-        (ocgen[g] == (generators[g].cost[1]*pg[g] + generators[g].cost[2])
+        (ocgen[g] == (generators[g].cost[1]*pg[g]*sbase + generators[g].cost[2])
             for g in generators), name="gencost"
     )
     # Apparent power flow limits on the receiving node
@@ -80,7 +82,8 @@ def calculatedlmp(
         ((
             sum(fp[li] for li in buses[b].outline)
             - sum(fp[li] - lines[li].r*a[li] for li in buses[b].inline)
-            - sum(pg[g] for g in B_gn[b]) + buses[b].Pd + v[b]*buses[b].Gs
+            - sum(pg[g] for g in B_gn[b])
+            + buses[b].Pd/sbase + v[b]*buses[b].Gs
             ) == 0 for b in buses),
         name="pbalance"
     )
@@ -89,7 +92,8 @@ def calculatedlmp(
         ((
             sum(fq[li] for li in buses[b].outline)
             - sum(fq[li] - lines[li].x*a[li] for li in buses[b].inline)
-            - sum(qg[g] for g in B_gn[b]) + buses[b].Qd - v[b]*buses[b].Bs
+            - sum(qg[g] for g in B_gn[b])
+            + buses[b].Qd/sbase - v[b]*buses[b].Bs
             ) == 0 for b in buses),
         name="qbalance"
     )
@@ -102,23 +106,23 @@ def calculatedlmp(
         name="vmin"
     )
     m.addConstrs(
-        (pg[g] >= generators[g].Pmin for g in generators),
+        (pg[g] >= generators[g].Pmin/sbase for g in generators),
         name="pgmin"
     )
     m.addConstrs(
-        (pg[g] <= generators[g].Pmax for g in generators),
+        (pg[g] <= generators[g].Pmax/sbase for g in generators),
         name="pgmax"
     )
     m.addConstrs(
-        (qg[g] >= generators[g].Qmin for g in generators),
+        (qg[g] >= generators[g].Qmin/sbase for g in generators),
         name="qgmin"
     )
     m.addConstrs(
-        (qg[g] <= generators[g].Qmax for g in generators),
+        (qg[g] <= generators[g].Qmax/sbase for g in generators),
         name="qgmax"
     )
     m.addConstrs(
-        (dispatch[g] == pg[g] for g in gensetP),
+        (dispatch[g]/sbase == pg[g] for g in gensetP),
         name="genpower"
     )
     m.Params.QCPDual = 1
@@ -145,19 +149,19 @@ def calculatedlmp(
         varCount += 1
     fp = {}
     for li in lines:
-        fp[li] = var[varCount].x
+        fp[li] = var[varCount].x*sbase
         varCount += 1
     fq = {}
     for li in lines:
-        fq[li] = var[varCount].x
+        fq[li] = var[varCount].x*sbase
         varCount += 1
     pg = {}
     for g in generators:
-        pg[g] = var[varCount].x
+        pg[g] = var[varCount].x*sbase
         varCount += 1
     qg = {}
     for g in generators:
-        qg[g] = var[varCount].x
+        qg[g] = var[varCount].x*sbase
         varCount += 1
     oc = var[varCount].x
     varCount += 1
