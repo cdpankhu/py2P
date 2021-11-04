@@ -17,6 +17,8 @@ def networkload(testsystem):
         usingMatPower = 0
     elif testsystem == "Test2Bus":
         usingMatPower = 0
+    elif testsystem == "6BusWiley":
+        usingMatPower = 0
     else:
         usingMatPower = 1
         # PUcorrection = 100
