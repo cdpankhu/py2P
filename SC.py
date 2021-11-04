@@ -357,4 +357,4 @@ def sc(testsystem):
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
 
-    return dispatch, dlmp, pnm
+    return dispatch, dlmp, pnm, lines, buses

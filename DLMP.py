@@ -344,10 +344,15 @@ def calculatedlmp(
         eq44[li] = 0
 
     for li in lines:
+        # The real power price at the ancestor node
         eq40[lines[li].fbus] = a1[li]*dual_pbalance[lines[li].tbus]
+        # The reactive power price at the current node
         eq41[lines[li].fbus] = a2[li]*dual_qbalance[lines[li].fbus]
+        # The reactive power price at the ancestor node
         eq42[lines[li].fbus] = a3[li]*dual_qbalance[lines[li].tbus]
+        # The contribution of the first complex power constraint
         eq43[lines[li].fbus] = a4[li]*dual_linecapfw[li]
+        # The contribution of the second complex power constraint
         eq44[lines[li].fbus] = a5[li]*dual_linecapbw[li]
         dlmp[lines[li].fbus] = (eq40[lines[li].fbus] + eq41[lines[li].fbus]
                                 + eq42[lines[li].fbus] + eq43[lines[li].fbus]

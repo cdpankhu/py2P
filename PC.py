@@ -140,6 +140,7 @@ def pc(testsystem):
 
     # need to add timer code for performance assessment
     feascount = 0
+    # Outer loop of iterative process
     while True:
         # print("Outer loop")
         accepted = {}
@@ -154,6 +155,7 @@ def pc(testsystem):
         for w in trades:
             trades[w].Pes = 0
             trades[w].Peb = 0
+        # Inner loop for negotiation of trades
         while True:
             # print("Inner loop")
             accepted = {}
@@ -171,6 +173,7 @@ def pc(testsystem):
 
             # price delta = $5/MWh = $0.005/kWh
             deltaP = 5*trade_scale
+            # Update trade prices according to presence in optimal sets
             for w in trades:
                 if (w in accepted[trades[w].Ab]) \
                         and not (w in accepted[trades[w].As]):
@@ -233,6 +236,7 @@ def pc(testsystem):
 
         # Update network charge
         deltaNw = trade_scale
+        # Trade state is feasible and DLMPs become network charges
         if status == 2:
             # For all trades in the feasible set, update network charge
             for w in trades_selected:
@@ -241,6 +245,7 @@ def pc(testsystem):
                     - dlmp[agents[trades[w].As].location])/2
                 # trades[w].penalty = 0
             feascount += 1
+        # Trade state infeasible, update network charge
         else:
             # For all trades in the infeasible set, inccrement network charge
             for w in trades_selected:
