@@ -15,7 +15,7 @@ def generatetrade(agents, trade_scale):
                 ceil(agents[b].Pd/trade_scale))
             # +1 since range is < max
             for k in range(1, up+1):
-                w = Trade(tradeID, 1, 0.0, 0.0, s, b, 0, 0)
+                w = Trade(tradeID, 1, 0.0, 0.0, s, b, 0.0, 0.0)
                 trades[tradeID] = w
                 tradeID += 1
     return trades
@@ -30,7 +30,8 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     pg = m.addVar(name="pg", lb=A[agentID].pgMin, ub=A[agentID].pgMax)
     revenuesell = m.addVar(name="revenuesell")
     costbuy = m.addVar(name="costbuy")
-    costnetwork = m.addVar(name="costnetwork")
+    costnetwork = m.addVar(name="costnetwork", lb=float('-inf'))
+    costpenalty = m.addVar(name="costpenalty", lb=float('-inf'))
     costdg = m.addVar(name="costdg")
     u = m.addVars((w for w in W), vtype=GRB.BINARY, name="u")
 
@@ -40,6 +41,7 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     obj = revenuesell
     obj -= costbuy
     obj -= costnetwork
+    obj -= costpenalty
     obj -= costdg
     m.setObjective(obj, GRB.MAXIMIZE)
 
@@ -55,30 +57,35 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     m.addConstr(
         costbuy == sum(W[i].Peb * u[i] for i in W if W[i].Ab == agentID),
         "c1")
-    # Define cost of network on transactions
+    # Define cost of network on transactions, buyer and seller share cost
     m.addConstr(
         costnetwork == trade_scale * (
             sum(W[i].costNw * u[i] for i in W if W[i].Ab == agentID)
             + sum(W[i].costNw * u[i] for i in W if W[i].As == agentID)),
         "c2")
+    # Define cost of penalty on transactions, buyer pays full penalty
+    m.addConstr(
+        costpenalty == trade_scale * (
+            sum(W[i].penalty * u[i] for i in W if W[i].Ab == agentID)),
+        "c3")
     # Define cost of DG generation operation
     m.addConstr(
         costdg == (
             A[agentID].costFn[0]*pg*pg + A[agentID].costFn[1]*pg
             + A[agentID].costFn[2]
             ),
-        "c3")
+        "c4")
     # Require that power from Dg is equal to the sum of selling trades
     # Need to make sure trading to oneself is okay!
     m.addConstr(
         pg/trade_scale == sum(u[i] for i in W if W[i].As == agentID),
-        "c4")
+        "c5")
     # Requires that the peer demand is equal to the sum of purchased trades
     # Currently Pd is fixed, no marginal value of additional demand. FIX!!!
     m.addConstr(
         floor(A[agentID].Pd/trade_scale)
         == sum(u[i] for i in W if W[i].Ab == agentID),
-        "c5")
+        "c6")
 
     # Run optimization
     for i in W:
@@ -88,10 +95,15 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     m.update()
 
     m.optimize()
+
+    status = m.Status
+    if not (status == GRB.OPTIMAL):
+        return status, [], [], 0, 0, 0, 0, 0, 0, m
     v = m.getVars()
     w = {}
     tradeID = 1
-    for i in range(5, len(v)):
+    # 6 to skip the first 6 vars
+    for i in range(6, len(v)):
         w[tradeID] = v[i].x
         tradeID += 1
     accepted = [i for i in w if w[i] == 1]
@@ -100,5 +112,7 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     revenuesell = m.getVarByName("revenuesell").x
     costbuy = m.getVarByName("costbuy").x
     costnetwork = m.getVarByName("costnetwork").x
+    costpenalty = m.getVarByName("costpenalty").x
     costdg = m.getVarByName("costdg").x
-    return accepted, rejected, pg, revenuesell, costbuy, costnetwork, costdg
+    return status, accepted, rejected, pg, revenuesell, \
+        costbuy, costnetwork, costpenalty, costdg, m

@@ -132,7 +132,9 @@ def calculatedlmp(
 
     status = m.Status
     if not (status == GRB.OPTIMAL):
-        return status, {}, {}, {}, {}, {}, {}
+        nodestatus, linestatus = calculatebinding(
+            m, len(buses), len(lines), len(generators))
+        return status, {}, {}, nodestatus, linestatus, {}, {}
 
     var = m.getVars()
 
@@ -394,3 +396,37 @@ def calculatedlmp(
     GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
 
     return status, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo
+
+
+def calculatebinding(model, buscount, linecount, gencount):
+
+    model.computeIIS()
+    iisconstr = model.IISConstr
+    iisqconstr = model.IISQConstr
+
+    # Getting base index for flow and voltage constraints
+    linecapfwindex = 0
+    linecapbwindex = linecapfwindex + linecount
+    vmaxindex = 0 + 1 + gencount + linecount + 1 + buscount + buscount
+    vminindex = vmaxindex + buscount
+
+    nodestatus = {}
+    linestatus = {}
+
+    # Assign nodestatus[b] == 1 if vmax violation, -1 if vmin violation
+    for i in range(buscount):
+        nodestatus[i+1] = 0
+        if iisconstr[vmaxindex + i] == 1:
+            nodestatus[i+1] = 1
+        elif iisconstr[vminindex + i] == 1:
+            nodestatus[i+1] = -1
+
+    # Assign linestatus[li] == 1 for linecapfw violation, -1 if linecapbw
+    for i in range(linecount):
+        linestatus[i+1] = 0
+        if iisqconstr[linecapfwindex + i] == 1:
+            linestatus[i+1] = -1
+        elif iisqconstr[linecapbwindex + i] == 1:
+            linestatus[i+1] = 1
+
+    return nodestatus, linestatus

@@ -1,8 +1,6 @@
 # SC.py
 from pandas import DataFrame
-from py2P.P2PTradeType import Agent
 from py2P.NetworkLoad import networkload
-from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
 from py2P.Coefficients import calculateptdf
 from math import pow, sqrt

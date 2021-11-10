@@ -4,6 +4,7 @@ from py2P.P2PTradeType import Agent
 from py2P.NetworkLoad import networkload
 from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
+from py2P.Coefficients import calculateptdf
 from math import pow, sqrt
 
 
@@ -84,6 +85,8 @@ def pc(testsystem):
                         gam[b]*buses[b].Qd)
                     agentID += 1
 
+    ptdf = calculateptdf(lines, buses, root)
+
     # Defining trades and result matrices
     trades = generatetrade(agents, trade_scale)
     trades_old = generatetrade(agents, trade_scale)
@@ -137,9 +140,9 @@ def pc(testsystem):
     for i in generators:
         dispatch_peerG[i] = 0
     param_delta = 10.0
+    penalty_delta = 2000.0
 
     # need to add timer code for performance assessment
-    feascount = 0
     # Outer loop of iterative process
     while True:
         # print("Outer loop")
@@ -149,6 +152,7 @@ def pc(testsystem):
         Revenue_Sell = {}
         Cost_Buy = {}
         Cost_Network = {}
+        Cost_Penalty = {}
         Cost_DG = {}
         trades_old = trades
         trades_selected_old = trades_selected
@@ -164,12 +168,15 @@ def pc(testsystem):
 
             gap = 1e-3
             for agentID in agents:
-                temp_accepted, temp_rejected, temp_pg, Revenue_Sell, Cost_Buy, \
-                    Cost_Network, Cost_DG = \
+                status, temp_accepted, temp_rejected, temp_pg, Revenue_Sell, \
+                    Cost_Buy, Cost_Network, Cost_Penalty, Cost_DG, model = \
                     selecttrade(trades, agents, agentID, gap, trade_scale)
                 accepted[agentID] = temp_accepted
                 rejected[agentID] = temp_rejected
                 pg[agentID] = temp_pg
+
+                if status != 2:
+                    return [], model
 
             # price delta = $5/MWh = $0.005/kWh
             deltaP = 5*trade_scale
@@ -228,7 +235,7 @@ def pc(testsystem):
 
         # Calculate network charge
         SMP = generators[root].cost[1]
-        # print(dispatch_peerG, generation, consumption)
+        print(dispatch_peerG)
         status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
             calculatedlmp(
                 dispatch_peerG, buses, generators, lines, SMP, gensetP, gensetU
@@ -243,19 +250,48 @@ def pc(testsystem):
                 trades[w].costNw = (
                     dlmp[agents[trades[w].Ab].location]
                     - dlmp[agents[trades[w].As].location])/2
-                # trades[w].penalty = 0
-            feascount += 1
         # Trade state infeasible, update network charge
         else:
-            # For all trades in the infeasible set, inccrement network charge
-            for w in trades_selected:
-                # trades[w].costNw += (pow(2, trades[w].penalty)
-                #                      )*deltaNw/trade_scale
-                # trades[w].penalty = + 1
-                trades[w].costNw += param_delta*deltaNw/trade_scale
+            # Update penalty for ALL trades according to proportional
+            # contribution to violated flow limits via ptdfs
+            for li in lines:
+                if LineInfo[li] != 0:
+                    fwsum = sum(abs(round(ptdf[li,
+                                               agents[trades[w].As].location,
+                                               agents[trades[w].Ab].location],
+                                          4))
+                                for w in trades if
+                                round(ptdf[li, agents[trades[w].As].location,
+                                           agents[trades[w].Ab].location],
+                                      4) > 0)
+                    bwsum = sum(abs(round(ptdf[li,
+                                               agents[trades[w].As].location,
+                                               agents[trades[w].Ab].location],
+                                          4))
+                                for w in trades if
+                                round(ptdf[li, agents[trades[w].As].location,
+                                           agents[trades[w].Ab].location],
+                                      4) < 0)
+                    for w in trades:
+                        wptdf = round(ptdf[li, agents[trades[w].As].location,
+                                           agents[trades[w].Ab].location], 4)
 
-        # for w in trades:
-        #     print(trades[w].costNw)
+                        # Update penalty of each trade
+                        if wptdf > 0:
+                            trades[w].penalty += (LineInfo[li] * penalty_delta
+                                                  * wptdf / fwsum)
+                        elif wptdf < 0:
+                            trades[w].penalty += (LineInfo[li] * penalty_delta
+                                                  * wptdf / bwsum)
+                        print(li, LineInfo[li], agents[trades[w].As].location,
+                              agents[trades[w].Ab].location, wptdf,
+                              trades[w].penalty)
+
+            # for w in trades_selected:
+            #     # trades[w].costNw += (pow(2, trades[w].penalty)
+            #     #                      )*deltaNw/trade_scale
+            #     # trades[w].penalty = + 1
+            #     trades[w].costNw += param_delta*deltaNw/trade_scale
 
         dispatch_stack.append(dispatch)
         dlmp_stack.append(dlmp)
@@ -511,4 +547,5 @@ def pc(testsystem):
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
 
+    return dispatch_stack, dlmp_stack
     return dispatch_stack, dlmp_stack
