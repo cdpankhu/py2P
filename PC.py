@@ -10,8 +10,8 @@ from math import pow, sqrt
 
 def pc(testsystem):
     buses, lines, generators, datamat = networkload(testsystem)
-    buses[1].Vmax = 1
-    buses[1].Vmin = 1
+    # buses[1].Vmax = 1
+    # buses[1].Vmin = 1
     windset = {}
     windex = 1
 
@@ -140,7 +140,8 @@ def pc(testsystem):
     for i in generators:
         dispatch_peerG[i] = 0
     param_delta = 10.0
-    penalty_delta = 2000.0
+    # The pool of penalty split across all fw and bw trades
+    penalty_delta = 500.0
 
     # need to add timer code for performance assessment
     # Outer loop of iterative process
@@ -256,22 +257,22 @@ def pc(testsystem):
             # contribution to violated flow limits via ptdfs
             for li in lines:
                 if LineInfo[li] != 0:
-                    fwsum = sum(abs(round(ptdf[li,
-                                               agents[trades[w].As].location,
+                    fwptdfsum = sum(abs(round(ptdf[li,
+                                                   agents[trades[w].As].location,
+                                                   agents[trades[w].Ab].location],
+                                              4))
+                                    for w in trades if
+                                    round(ptdf[li, agents[trades[w].As].location,
                                                agents[trades[w].Ab].location],
-                                          4))
-                                for w in trades if
-                                round(ptdf[li, agents[trades[w].As].location,
-                                           agents[trades[w].Ab].location],
-                                      4) > 0)
-                    bwsum = sum(abs(round(ptdf[li,
-                                               agents[trades[w].As].location,
+                                          4) > 0)
+                    bwptdfsum = sum(abs(round(ptdf[li,
+                                                   agents[trades[w].As].location,
+                                                   agents[trades[w].Ab].location],
+                                              4))
+                                    for w in trades if
+                                    round(ptdf[li, agents[trades[w].As].location,
                                                agents[trades[w].Ab].location],
-                                          4))
-                                for w in trades if
-                                round(ptdf[li, agents[trades[w].As].location,
-                                           agents[trades[w].Ab].location],
-                                      4) < 0)
+                                          4) < 0)
                     for w in trades:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                            agents[trades[w].Ab].location], 4)
@@ -279,19 +280,13 @@ def pc(testsystem):
                         # Update penalty of each trade
                         if wptdf > 0:
                             trades[w].penalty += (LineInfo[li] * penalty_delta
-                                                  * wptdf / fwsum)
+                                                  * wptdf / fwptdfsum)
                         elif wptdf < 0:
                             trades[w].penalty += (LineInfo[li] * penalty_delta
-                                                  * wptdf / bwsum)
+                                                  * wptdf / bwptdfsum)
                         print(li, LineInfo[li], agents[trades[w].As].location,
                               agents[trades[w].Ab].location, wptdf,
                               trades[w].penalty)
-
-            # for w in trades_selected:
-            #     # trades[w].costNw += (pow(2, trades[w].penalty)
-            #     #                      )*deltaNw/trade_scale
-            #     # trades[w].penalty = + 1
-            #     trades[w].costNw += param_delta*deltaNw/trade_scale
 
         dispatch_stack.append(dispatch)
         dlmp_stack.append(dlmp)
@@ -473,20 +468,23 @@ def pc(testsystem):
     ep_u = {}
     ep_p = {}
     nuc = {}
+    pen = {}
     for b in buses:
         demand_P2P[b] = 0
         ep_u[b] = 0
         ep_p[b] = 0
         nuc[b] = 0
+        pen[b] = 0
 
     for m in B_d:
         demand_P2P[m] = sum(trades_dis[n, m] for n in B_g)
-        ep_u[m] = (buses[m].Pd - demand_P2P[m])*dlmp[m]*trade_scale
+        ep_u[m] = (buses[m].Pd - demand_P2P[m])*dlmp[m]
 
     for w in trades_selected:
-        ep_p[agents[trades[w].Ab].location] += trades[w].Pes*trade_scale
+        ep_p[agents[trades[w].Ab].location] += trades[w].Pes
         nuc[agents[trades[w].Ab].location] += 0.5*trades[w].costNw*trade_scale
         nuc[agents[trades[w].As].location] += 0.5*trades[w].costNw*trade_scale
+        pen[agents[trades[w].Ab].location] += trades[w].penalty*trade_scale
 
     ur = {}
     cp = {}
@@ -507,13 +505,15 @@ def pc(testsystem):
     sum_ep_p = sum(ep_p[b] for b in buses)
     sum_ep_u = sum(ep_u[b] for b in buses)
     sum_nuc = sum(nuc[b] for b in buses)
+    sum_pen = sum(pen[b] for b in buses)
 
-    cashflow_mat = DataFrame([ep_p, ep_u, nuc, ur, cp],
-                             index=['ep_p', 'ep_u', 'nuc', 'ur', 'cp'])
+    cashflow_mat = DataFrame([ep_p, ep_u, nuc, pen, ur, cp],
+                             index=['ep_p', 'ep_u', 'nuc', 'pen', 'ur', 'cp'])
     cashflow_sum = DataFrame([sum_cp, sum_ep_p, sum_ep_u,
-                              sum_nuc, sum_dgr, sum_dgp, up],
+                              sum_nuc, sum_pen, sum_dgr, sum_dgp, up],
                              index=['sum_cp', 'sum_ep_p', 'sum_ep_u',
-                                    'sum_nuc', 'sum_dgr', 'sum_dgp', 'up'])
+                                    'sum_nuc', 'sum_pen', 'sum_dgr',
+                                    'sum_dgp', 'up'])
 
     print("partlevel = ", partlevel)
     print("status = ", status)

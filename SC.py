@@ -2,17 +2,19 @@
 from pandas import DataFrame
 from py2P.NetworkLoad import networkload
 from py2P.DLMP import calculatedlmp
-from py2P.Coefficients import calculateptdf
+from py2P.Coefficients import calculateptdf, makeYbus
 from math import pow, sqrt
 from gurobipy import Model, GRB
 
 
 def sc(testsystem):
     buses, lines, generators, datamat = networkload(testsystem)
-    buses[1].Vmax = 1
-    buses[1].Vmin = 1
+    # buses[1].Vmax = 1
+    # buses[1].Vmin = 1
     windset = {}
     windex = 1
+
+    Ybus = makeYbus(buses, lines)
 
     for g in generators:
         if generators[g].gtype == "Wind":
@@ -142,7 +144,8 @@ def sc(testsystem):
     # Voltage contraint for root node
     for g in generators:
         if generators[g].gtype == "Root":
-            m.addConstr(v[generators[g].location] == 1, name="rootvoltage")
+            m.addConstr(v[generators[g].location] == pow(generators[g].Vg, 2),
+                        name="rootvoltage")
     # Active power balance constraint
     m.addConstrs(
         ((
@@ -153,11 +156,12 @@ def sc(testsystem):
             ) == 0 for b in buses),
         name="pbalance"
     )
-    # Reactive power balance constraint
+    # Reactive power balance constraint with branch admittance
     m.addConstrs(
         ((
-            sum(fq[li] for li in buses[b].outline)
-            - sum(fq[li] - lines[li].x*a[li] for li in buses[b].inline)
+            sum(fq[li] - lines[li].b*v[b]/2 for li in buses[b].outline)
+            - sum(fq[li] - lines[li].x*a[li]
+                  + lines[li].b*v[b]/2 for li in buses[b].inline)
             - sum(qg[g] for g in B_gn[b])
             + buses[b].Qd/sbase - v[b]*buses[b].Bs
             ) == 0 for b in buses),
@@ -361,14 +365,4 @@ def sc(testsystem):
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
 
-    ######
-    ptdf = calculateptdf(lines, buses, root)
-    flows = {}
-    for li in lines:
-        flows[li] = 0
-        for b in buses:
-            for k in buses:
-                if pnm[b, k] > 0:
-                    flows[li] += pnm[b, k] * ptdf[li, b, k]
-
-    return dispatch, dlmp, pnm, lines, buses, flows, ptdf
+    return pnm

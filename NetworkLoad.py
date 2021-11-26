@@ -5,6 +5,8 @@ from py2P.NetworkDataType import Bus, Line, Generator
 from pypower.api import \
     case118, case14, case24_ieee_rts, case30, case300, case30Q, case30pwl, \
     case39, case4gs, case57, case6ww, case9, case9Q, case9target
+from py2P.case9DN import case9DN
+from py2P.caseAP15busDN import caseAP15busDN
 
 
 def networkload(testsystem):
@@ -204,7 +206,7 @@ def networkload_matpower(testsystem):
         r = mpc["branch"][i, 2]
         x = mpc["branch"][i, 3]
         b = mpc["branch"][i, 4]
-        u = 10000
+        u = mpc["branch"][i, 5]
         # buses[fbus].children.append(tbus)
         # buses[tbus].ancestor.append(fbus)
         # buses[tbus].inline.append(lindex)
@@ -266,3 +268,7 @@ def matpowercase(testsystem):
         return case118()
     elif testsystem == "case300":
         return case300()
+    elif testsystem == "case9DN":
+        return case9DN()
+    elif testsystem == "caseAP15busDN":
+        return caseAP15busDN()

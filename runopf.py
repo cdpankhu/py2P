@@ -2,13 +2,27 @@
 from gurobipy import Model, GRB
 from math import pow, sqrt
 from pandas import DataFrame
-from py2P.Coefficients import anglerecovery
+from py2P.Coefficients import anglerecovery, makeYbus
 
 
-def calculatedlmp(
-        dispatch, buses, generators, lines, SMP, gensetP, gensetU):
+def runopf(buses, generators, lines):
 
-    print(dispatch)
+    root = -1
+    for g in generators:
+        if generators[g].gtype == "Root":
+            root = generators[g].location
+
+    if root == -1:
+        print("No generator at root node")
+        generators[1].gtype = "Root"
+        root = 1
+
+    gensetP = []
+    gensetU = [root]
+    for g in generators:
+        if not g == root:
+            gensetP.append(g)
+
     # Consider reducing cyclomatic complexity by moving shadow price extraction
     B_gn = {}
     for i in buses:
@@ -50,14 +64,14 @@ def calculatedlmp(
     # Apparent power flow limits on the receiving node
     m.addConstrs(
         ((fp[li]*fp[li] + fq[li]*fq[li])
-            <= lines[li].u*lines[li].u for li in lines),
+            <= lines[li].u/sbase*lines[li].u/sbase for li in lines),
         name="linecapfw"
     )
     # Apparent power flow limits on the sending node
     m.addConstrs(
         ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
             + (fq[li] - a[li]*lines[li].x)*(fq[li] - a[li]*lines[li].x)
-            <= (lines[li].u)*(lines[li].u) for li in lines),
+            <= (lines[li].u/sbase)*(lines[li].u/sbase) for li in lines),
         name="linecapbw"
     )
     # Constraint relating the line flows and voltages
@@ -80,7 +94,7 @@ def calculatedlmp(
         if generators[g].gtype == "Root":
             m.addConstr(v[generators[g].location] == pow(generators[g].Vg, 2),
                         name="rootvoltage")
-    # Active power balance constraint
+    # Active power balance constraint with branch admittance
     m.addConstrs(
         ((
             sum(fp[li] for li in buses[b].outline)
@@ -125,10 +139,6 @@ def calculatedlmp(
         (qg[g] <= generators[g].Qmax/sbase for g in generators),
         name="qgmax"
     )
-    m.addConstrs(
-        (dispatch[g]/sbase == pg[g] for g in gensetP),
-        name="genpower"
-    )
     m.Params.QCPDual = 1
     m.Params.BarQCPConvTol = 1e-7
     m.update()
@@ -138,6 +148,15 @@ def calculatedlmp(
     status = m.Status
 
     if not (status == GRB.OPTIMAL):
+        m.computeIIS()
+        constr = m.getConstrs()
+        Qconstr = m.getQConstrs()
+        for i in range(len(m.IISConstr)):
+            if m.IISConstr[i]:
+                print(constr[i])
+        for i in range(len(m.IISQConstr)):
+            if m.IISQConstr[i]:
+                print(Qconstr[i])
         nodestatus, linestatus = calculatebinding(
             m, len(buses), len(lines), len(generators))
         return status, {}, {}, nodestatus, linestatus, {}, {}
@@ -187,6 +206,8 @@ def calculatedlmp(
         if B_gn[b]:
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
+
+    theta = anglerecovery(lines, buses, fp, fq, v)
 
     # Getting constraint duals
     constrs = m.getConstrs()
@@ -370,8 +391,6 @@ def calculatedlmp(
                                 + eq42[lines[li].fbus] + eq43[lines[li].fbus]
                                 + eq44[lines[li].fbus])
 
-    theta = anglerecovery(lines, buses, fp, fq, v)
-
     print("::Network Info::\n")
     for b in buses:
         pgb[b] = round(pgb[b]*sbase, 4)
@@ -409,7 +428,7 @@ def calculatedlmp(
 
     GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
 
-    return status, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo
+    return status, dlmp, v, theta, NodeInfo, LineInfo, DLMPInfo, GenInfo
 
 
 def calculatebinding(model, buscount, linecount, gencount):
