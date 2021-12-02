@@ -5,11 +5,12 @@ from py2P.NetworkLoad import networkload
 from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
 from py2P.Coefficients import calculateptdf
+from py2P.makeJac import makeJacVSC
 from math import pow, sqrt
 
 
 def pc(testsystem):
-    buses, lines, generators, datamat = networkload(testsystem)
+    buses, lines, generators, datamat, ppc = networkload(testsystem)
     # buses[1].Vmax = 1
     # buses[1].Vmin = 1
     windset = {}
@@ -140,8 +141,6 @@ def pc(testsystem):
     for i in generators:
         dispatch_peerG[i] = 0
     param_delta = 10.0
-    # The pool of penalty split across all fw and bw trades
-    penalty_delta = 500.0
 
     # need to add timer code for performance assessment
     # Outer loop of iterative process
@@ -273,21 +272,29 @@ def pc(testsystem):
                                     round(ptdf[li, agents[trades[w].As].location,
                                                agents[trades[w].Ab].location],
                                           4) < 0)
+                    #  penpool is defined as the some of ptdf for bad trades
+                    penpool = 0
+                    if LineInfo[li] == -1:
+                        penpool = fwptdfsum
+                    elif LineInfo[li] == 1:
+                        penpool = bwptdfsum
                     for w in trades:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                            agents[trades[w].Ab].location], 4)
 
-                        # Update penalty of each trade
                         if wptdf > 0:
-                            trades[w].penalty += (LineInfo[li] * penalty_delta
+                            trades[w].penalty += (LineInfo[li] * penpool
                                                   * wptdf / fwptdfsum)
                         elif wptdf < 0:
-                            trades[w].penalty += (LineInfo[li] * penalty_delta
+                            trades[w].penalty += (LineInfo[li] * penpool
                                                   * wptdf / bwptdfsum)
                         print(li, LineInfo[li], agents[trades[w].As].location,
                               agents[trades[w].Ab].location, wptdf,
                               trades[w].penalty)
-
+            for b in buses:
+                if NodeInfo[b] != 0:
+                    vm_p_sc, vm_q_sc, va_p_sc, va_q_sc = makeJacVSC(
+                        ppc, NodeInfo['v'], NodeInfo['theta'])
         dispatch_stack.append(dispatch)
         dlmp_stack.append(dlmp)
 

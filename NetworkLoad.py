@@ -135,7 +135,7 @@ def networkload_nomatpower(testsystem):
     datamat["bus"] = busmat
     datamat["branch"] = branchmat
     datamat["gen"] = genmat
-    return buses, lines, generators, datamat
+    return buses, lines, generators, datamat, {}
 
 
 def networkload_matpower(testsystem):
@@ -236,7 +236,7 @@ def networkload_matpower(testsystem):
             elif lines[j].tbus == lines[k].fbus:
                 lines[j].children.append(k)
 
-    return buses, lines, generators, datamat
+    return buses, lines, generators, datamat, mpc
 
 
 def matpowercase(testsystem):
