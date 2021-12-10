@@ -30,7 +30,8 @@ def calculateptdf(lines, buses, root):
     for li in lines:
         for s in buses:
             for b in buses:
-                ptdf[li, s, b] = isf[li-1, s-1] - isf[li-1, b-1]
+                ptdf[li, s, b] = isf[int(li-1), int(s-1)] \
+                    - isf[int(li-1), int(b-1)]
 
     return ptdf
 

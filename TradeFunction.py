@@ -50,12 +50,13 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     # Create constraints
     # Define revenue from sales to peers
     m.addConstr(
-        revenuesell
-        == sum(W[i].Pes * u[i] for i in W if W[i].As == agentID),
+        revenuesell == trade_scale * (
+            sum(W[i].Pes * u[i] for i in W if W[i].As == agentID)),
         "c0")
     # Define cost of purchasing from peers
     m.addConstr(
-        costbuy == sum(W[i].Peb * u[i] for i in W if W[i].Ab == agentID),
+        costbuy == trade_scale * (
+            sum(W[i].Peb * u[i] for i in W if W[i].Ab == agentID)),
         "c1")
     # Define cost of network on transactions, buyer and seller share cost
     m.addConstr(
@@ -72,13 +73,12 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     m.addConstr(
         costdg == (
             A[agentID].costFn[0]*pg*pg + A[agentID].costFn[1]*pg
-            + A[agentID].costFn[2]
-            ),
+            + A[agentID].costFn[2]),
         "c4")
     # Require that power from Dg is equal to the sum of selling trades
     # Need to make sure trading to oneself is okay!
     m.addConstr(
-        pg/trade_scale == sum(u[i] for i in W if W[i].As == agentID),
+        pg == trade_scale * sum(u[i] for i in W if W[i].As == agentID),
         "c5")
     # Requires that the peer demand is equal to the sum of purchased trades
     # Currently Pd is fixed, no marginal value of additional demand. FIX!!!
@@ -91,6 +91,9 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     for i in W:
         if not (W[i].As == agentID or W[i].Ab == agentID):
             m.addConstr(u[i] == 0)
+        else:
+            if W[i].cleared == 1:
+                m.addConstr(u[i] == 1)
 
     m.update()
 
@@ -103,7 +106,7 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     w = {}
     tradeID = 1
     # 6 to skip the first 6 vars
-    for i in range(6, len(v)):
+    for i in range(6, 6 + len(W)):
         w[tradeID] = v[i].x
         tradeID += 1
     accepted = [i for i in w if w[i] == 1]

@@ -6,6 +6,7 @@ from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
 from py2P.Coefficients import calculateptdf
 from py2P.makeJac import makeJacVSC
+from py2P.penaltyutil import vm_p_sum
 from math import pow, sqrt
 
 
@@ -140,7 +141,7 @@ def pc(testsystem):
     dispatch_peerG = {}
     for i in generators:
         dispatch_peerG[i] = 0
-    param_delta = 10.0
+    outer_iter = 0
 
     # need to add timer code for performance assessment
     # Outer loop of iterative process
@@ -159,6 +160,8 @@ def pc(testsystem):
         for w in trades:
             trades[w].Pes = 0
             trades[w].Peb = 0
+            trades[w].cleared = 0
+        outer_iter += 1
         # Inner loop for negotiation of trades
         while True:
             # print("Inner loop")
@@ -179,15 +182,21 @@ def pc(testsystem):
                     return [], model
 
             # price delta = $5/MWh = $0.005/kWh
-            deltaP = 5*trade_scale
+            deltaP = 1
             # Update trade prices according to presence in optimal sets
+            # Note price only increases and so may overshoot optimal
+            changestate = 0
             for w in trades:
                 if (w in accepted[trades[w].Ab]) \
                         and not (w in accepted[trades[w].As]):
+                    changestate = 1
                     if trades[w].Peb > trades[w].Pes:
                         trades[w].Pes += deltaP
                     else:
                         trades[w].Peb += deltaP
+                if (w in accepted[trades[w].Ab]) \
+                        and (w in accepted[trades[w].As]):
+                    trades[w].cleared = 1
             diff = -1
             if not trades:
                 diff = 0
@@ -195,7 +204,7 @@ def pc(testsystem):
                 diff = sum((w in accepted[trades[w].Ab]) and not (
                     w in accepted[trades[w].As]) for w in trades)
 
-            if diff == 0:
+            if changestate == 0:
                 break
 
         trades_selected = []
@@ -242,20 +251,36 @@ def pc(testsystem):
                 )
 
         # Update network charge
-        deltaNw = trade_scale
         # Trade state is feasible and DLMPs become network charges
         if status == 2:
-            # For all trades in the feasible set, update network charge
-            for w in trades_selected:
+            # For all trades, update network charge
+            for w in trades:
                 trades[w].costNw = (
                     dlmp[agents[trades[w].Ab].location]
                     - dlmp[agents[trades[w].As].location])/2
         # Trade state infeasible, update network charge
         else:
+            NodeState = NodeInfo.loc['status']
+            LineState = LineInfo.loc['status']
+            print(NodeState, LineState)
+            nodestatus = sum(abs(NodeState[b]) for b in buses)
+            linestatus = sum(abs(LineState[li]) for li in lines)
+            # Run relaxed power flow to get feasible voltages and DLMPs
+            print("Relaxed model")
+            status2, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
+                calculatedlmp(dispatch_peerG, buses, generators, lines,
+                              SMP, gensetP, gensetU, NodeInfo=NodeState,
+                              LineInfo=LineState)
+            # Update nuc with relaxed DLMPs
+            # if status2 == 2:
+            #     for w in trades:
+            #         trades[w].costNw = (
+            #             dlmp[agents[trades[w].Ab].location]
+            #             - dlmp[agents[trades[w].As].location])/2
             # Update penalty for ALL trades according to proportional
             # contribution to violated flow limits via ptdfs
             for li in lines:
-                if LineInfo[li] != 0:
+                if LineState[li] != 0:
                     fwptdfsum = sum(abs(round(ptdf[li,
                                                    agents[trades[w].As].location,
                                                    agents[trades[w].Ab].location],
@@ -274,29 +299,69 @@ def pc(testsystem):
                                           4) < 0)
                     #  penpool is defined as the some of ptdf for bad trades
                     penpool = 0
-                    if LineInfo[li] == -1:
-                        penpool = fwptdfsum
-                    elif LineInfo[li] == 1:
-                        penpool = bwptdfsum
+                    if LineState[li] == -1:
+                        penpool = bwptdfsum/2
+                    elif LineState[li] == 1:
+                        penpool = fwptdfsum/2
+                    # Testing code to set penalty at advanced state
+                    # Remove for final code/model
+                    if outer_iter == 1:
+                        for w in trades:
+                            wptdf = round(ptdf[li, agents[trades[w].As].location,
+                                               agents[trades[w].Ab].location], 4)
+                            if wptdf > 0:
+                                trades[w].penalty += 40
+                            elif wptdf < 0:
+                                trades[w].penalty += 40
+                    # end of code to remove
+
                     for w in trades:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                            agents[trades[w].Ab].location], 4)
 
                         if wptdf > 0:
-                            trades[w].penalty += (LineInfo[li] * penpool
+                            trades[w].penalty += (LineState[li] * penpool
                                                   * wptdf / fwptdfsum)
                         elif wptdf < 0:
-                            trades[w].penalty += (LineInfo[li] * penpool
+                            trades[w].penalty += (LineState[li] * penpool
                                                   * wptdf / bwptdfsum)
-                        print(li, LineInfo[li], agents[trades[w].As].location,
-                              agents[trades[w].Ab].location, wptdf,
-                              trades[w].penalty)
-            for b in buses:
-                if NodeInfo[b] != 0:
-                    vm_p_sc, vm_q_sc, va_p_sc, va_q_sc = makeJacVSC(
-                        ppc, NodeInfo['v'], NodeInfo['theta'])
-        dispatch_stack.append(dispatch)
-        dlmp_stack.append(dlmp)
+                    for w in trades:
+                        print(li, LineState[li], agents[trades[w].As].location,
+                              agents[trades[w].Ab].location, trades[w].Pes,
+                              trades[w].Peb, trades[w].costNw,
+                              trades[w].penalty,
+                              trades[w].costNw+trades[w].penalty,
+                              trades[w].cleared)
+            if nodestatus != 0:
+                vm_p_sc, vm_q_sc, va_p_sc, va_q_sc = makeJacVSC(
+                    ppc, NodeInfo.loc['v'], NodeInfo.loc['theta'])
+                for b in buses:
+                    if NodeState[b] != 0:
+                        vsc_pos_sum, vsc_neg_sum = vm_p_sum(
+                            b, trades, agents, vm_p_sc)
+                        penpool = 0
+                        if NodeState[b] == 1:
+                            penpool = vsc_pos_sum
+                        elif NodeState[b] == -1:
+                            penpool = vsc_neg_sum
+                        for w in trades:
+                            wvsc = round(
+                                vm_p_sc[b, agents[trades[w].As].location]
+                                - vm_p_sc[b, agents[trades[w].Ab].location], 4)
+                            if wvsc > 0:
+                                trades[w].penalty += NodeState[b] * \
+                                    wvsc * penpool / vsc_pos_sum
+                            elif wvsc < 0:
+                                trades[w].penalty += NodeState[b] * \
+                                    wvsc * penpool / vsc_neg_sum
+        dispatch_temp = {}
+        dlmp_temp = {}
+        for i in dispatch:
+            dispatch_temp[i] = dispatch[i]
+        for i in dlmp:
+            dlmp_temp[i] = dlmp[i]
+        dispatch_stack.append(dispatch_temp)
+        dlmp_stack.append(dlmp_temp)
 
         # If gencon is unchanged, break while loop
         if gencon_old == gencon and status == 2:
@@ -497,7 +562,7 @@ def pc(testsystem):
     cp = {}
     for b in buses:
         ur[b] = ep_u[b] + nuc[b]
-        cp[b] = ur[b] + ep_p[b]
+        cp[b] = ur[b] + ep_p[b] + pen[b]
 
     gc = {}
     for g in generators:
@@ -521,6 +586,9 @@ def pc(testsystem):
                              index=['sum_cp', 'sum_ep_p', 'sum_ep_u',
                                     'sum_nuc', 'sum_pen', 'sum_dgr',
                                     'sum_dgp', 'up'])
+
+    data_mat = DataFrame([trades_dis, nwcharge_dis, echarge_dis],
+                         index=['trades_dis', 'nwcharge_dis', 'echarge_dis'])
 
     print("partlevel = ", partlevel)
     print("status = ", status)
@@ -546,6 +614,8 @@ def pc(testsystem):
         testsystem+"_"+str(100*partlevel)+"_cfmat.csv"
     cashflowsumfile = basefile+method+"_" + \
         testsystem+"_"+str(100*partlevel)+"_cfsum.csv"
+    datafile = basefile+method+"_" + \
+        testsystem+"_"+str(100*partlevel)+"_data.csv"
     bus_frame.to_csv(busfile)
     cashflow_mat.to_csv(cashflowmatfile)
     cashflow_sum.to_csv(cashflowsumfile)
@@ -553,6 +623,6 @@ def pc(testsystem):
     LineInfo.to_csv(linefile)
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
+    data_mat.to_csv(datafile)
 
-    return dispatch_stack, dlmp_stack
-    return dispatch_stack, dlmp_stack
+    return dispatch_stack, dlmp_stack, trades, trades_selected, agents

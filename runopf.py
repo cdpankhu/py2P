@@ -35,12 +35,8 @@ def runopf(testsystem):
         B_gn[generators[g].location].append(g)
 
     sbase = generators[1].mBase
-    NodeInfo = {}
-    for b in buses:
-        NodeInfo[b] = 0
-    NodeInfo[9] = -1
     m = makeModel(buses, generators, lines, gensetP,
-                  gensetU, NodeInfo=NodeInfo)
+                  gensetU)
 
     m.optimize()
 

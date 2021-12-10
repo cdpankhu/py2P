@@ -206,6 +206,7 @@ def sc(testsystem):
                               sum_dgr, sum_dgp, up],
                              index=['sum_cp', 'sum_ep_p', 'sum_ep_u', 'sum_nuc',
                                     'sum_dgr', 'sum_dgp', 'up'])
+    data_mat = DataFrame([pnm], index=["trades_dis"])
 
     print("partlevel = ", partlevel)
     print("status = ", status)
@@ -231,6 +232,8 @@ def sc(testsystem):
         testsystem+"_"+str(100*partlevel)+"_cfmat.csv"
     cashflowsumfile = basefile+method+"_" + \
         testsystem+"_"+str(100*partlevel)+"_cfsum.csv"
+    datafile = basefile+method+"_" + \
+        testsystem+"_"+str(100*partlevel)+"_data.csv"
     bus_frame.to_csv(busfile)
     cashflow_mat.to_csv(cashflowmatfile)
     cashflow_sum.to_csv(cashflowsumfile)
@@ -238,5 +241,6 @@ def sc(testsystem):
     LineInfo.to_csv(linefile)
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
+    data_mat.to_csv(datafile)
 
-    return pnm
+    return pnm, dlmp

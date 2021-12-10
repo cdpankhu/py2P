@@ -78,19 +78,48 @@ def makeModel(buses, generators, lines, gensetP, gensetU, **optional):
         (ocgen[g] == (generators[g].cost[1]*pg[g]*sbase + generators[g].cost[2])
             for g in generators), name="gencost"
     )
-    # Apparent power flow limits on the receiving node
-    m.addConstrs(
-        ((fp[li]*fp[li] + fq[li]*fq[li])
-            <= lines[li].u*lines[li].u for li in lines),
-        name="linecapfw"
-    )
-    # Apparent power flow limits on the sending node
-    m.addConstrs(
-        ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
-            + (fq[li] - a[li]*lines[li].x)*(fq[li] - a[li]*lines[li].x)
-            <= (lines[li].u)*(lines[li].u) for li in lines),
-        name="linecapbw"
-    )
+    if "LineInfo" in optional:
+        M = 1000
+        for li in lines:
+            # Apparent power flow limits on the receiving node
+            if optional['LineInfo'][li] == -1:
+                m.addConstr(((fp[li]*fp[li] + fq[li]*fq[li])
+                             <= M*lines[li].u*lines[li].u),
+                            name="linecapfw["+str(li)+"]")
+            else:
+                m.addConstr(
+                    ((fp[li]*fp[li] + fq[li]*fq[li])
+                        <= lines[li].u*lines[li].u),
+                    name="linecapfw["+str(li)+"]")
+            # Apparent power flow limits on the sending node
+            if optional['LineInfo'][li] == 1:
+                m.addConstr(
+                    ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
+                        + (fq[li] - a[li]*lines[li].x)
+                        * (fq[li] - a[li]*lines[li].x)
+                        <= M*(lines[li].u)*(lines[li].u)),
+                    name="linecapbw["+str(li)+"]")
+            else:
+                m.addConstr(
+                    ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
+                        + (fq[li] - a[li]*lines[li].x)
+                        * (fq[li] - a[li]*lines[li].x)
+                        <= (lines[li].u)*(lines[li].u)),
+                    name="linecapbw["+str(li)+"]")
+    else:
+        # Apparent power flow limits on the receiving node
+        m.addConstrs(
+            ((fp[li]*fp[li] + fq[li]*fq[li])
+                <= lines[li].u*lines[li].u for li in lines),
+            name="linecapfw"
+        )
+        # Apparent power flow limits on the sending node
+        m.addConstrs(
+            ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
+                + (fq[li] - a[li]*lines[li].x)*(fq[li] - a[li]*lines[li].x)
+                <= (lines[li].u)*(lines[li].u) for li in lines),
+            name="linecapbw"
+        )
     # Constraint relating the line flows and voltages
     m.addConstrs(
         ((v[lines[li].fbus]

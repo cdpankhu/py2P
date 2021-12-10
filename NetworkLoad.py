@@ -10,7 +10,7 @@ from py2P.caseAP15busDN import caseAP15busDN
 
 
 def networkload(testsystem):
-    if testsystem == "AP15busDN":
+    if testsystem == "AP15busDN" or testsystem == "AP15busDN_M":
         usingMatPower = 0
     elif testsystem == "IEEE33busDN" or testsystem == "IEEE33busDN2" \
             or testsystem == "ISONE8busTN":
