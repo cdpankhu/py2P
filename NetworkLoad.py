@@ -7,6 +7,8 @@ from pypower.api import \
     case39, case4gs, case57, case6ww, case9, case9Q, case9target
 from py2P.case9DN import case9DN
 from py2P.caseAP15busDN import caseAP15busDN
+from py2P.caseAP15busDNtest import caseAP15busDNtest
+from py2P.caseAP15busDN3gen import caseAP15busDN3gen
 
 
 def networkload(testsystem):
@@ -272,3 +274,7 @@ def matpowercase(testsystem):
         return case9DN()
     elif testsystem == "caseAP15busDN":
         return caseAP15busDN()
+    elif testsystem == "caseAP15busDNtest":
+        return caseAP15busDNtest()
+    elif testsystem == "caseAP15busDN3gen":
+        return caseAP15busDN3gen()

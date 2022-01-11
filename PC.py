@@ -7,15 +7,21 @@ from py2P.DLMP import calculatedlmp
 from py2P.Coefficients import calculateptdf
 from py2P.makeJac import makeJacVSC
 from py2P.penaltyutil import vm_p_sum
+from py2P.SC import sc
 from math import pow, sqrt
+from time import strftime
+from os import makedirs
 
 
-def pc(testsystem):
+def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     buses, lines, generators, datamat, ppc = networkload(testsystem)
     # buses[1].Vmax = 1
     # buses[1].Vmin = 1
     windset = {}
     windex = 1
+
+    # get reference dlmp for nuc of tradings
+    pnm, dlmp_reference = sc(testsystem)
 
     for g in generators:
         if generators[g].gtype == "Wind":
@@ -61,9 +67,9 @@ def pc(testsystem):
     for b in buses:
         gam[b] = partlevel
 
-    # Scale of each trade in MWh
-    trade_scale = 1e-3  # trade in kWh
-    # trade_scale = 1  # trade in MWh
+    # # Scale of each trade in MWh
+    # trade_scale = 1e-3  # trade in kWh
+    # # trade_scale = 1  # trade in MWh
 
     # Defining trading agents at non-root buses
     # Current definition defines a single agent of type 1 at each demand bus.
@@ -92,6 +98,60 @@ def pc(testsystem):
     # Defining trades and result matrices
     trades = generatetrade(agents, trade_scale)
     trades_old = generatetrade(agents, trade_scale)
+
+    #Set trade nuc based on reference system usage charges
+    for w in trades:
+        trades[w].costNw = (
+             dlmp_reference[agents[trades[w].Ab].location]
+             - dlmp_reference[agents[trades[w].As].location])/2
+        # if agents[trades[w].Ab].location == 2 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 1/2
+        # elif agents[trades[w].Ab].location == 4 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 3/2
+        # elif agents[trades[w].Ab].location == 5 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 4/2
+        # elif agents[trades[w].Ab].location == 6 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 5/2
+        # elif agents[trades[w].Ab].location == 7 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 6/2
+        # elif agents[trades[w].Ab].location == 8 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 4/2
+        # elif agents[trades[w].Ab].location == 9 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 5/2
+        # elif agents[trades[w].Ab].location == 10 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 5/2
+        # elif agents[trades[w].Ab].location == 11 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 6/2
+        # elif agents[trades[w].Ab].location == 13 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 1/2
+        # elif agents[trades[w].Ab].location == 14 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 2/2
+        # elif agents[trades[w].Ab].location == 15 and agents[trades[w].As].location == 1:
+        #     trades[w].costNw = 3/2
+        # elif agents[trades[w].Ab].location == 2 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 6/2
+        # elif agents[trades[w].Ab].location == 4 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 4/2
+        # elif agents[trades[w].Ab].location == 5 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 5/2
+        # elif agents[trades[w].Ab].location == 6 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 6/2
+        # elif agents[trades[w].Ab].location == 7 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 7/2
+        # elif agents[trades[w].Ab].location == 8 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 3/2
+        # elif agents[trades[w].Ab].location == 9 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 4/2
+        # elif agents[trades[w].Ab].location == 10 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 2/2
+        # elif agents[trades[w].Ab].location == 11 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 1/2
+        # elif agents[trades[w].Ab].location == 13 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 8/2
+        # elif agents[trades[w].Ab].location == 14 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 9/2
+        # elif agents[trades[w].Ab].location == 15 and agents[trades[w].As].location == 12:
+        #     trades[w].costNw = 10/2
 
     trades_mat = {}
     trades_mat_buy = {}
@@ -139,14 +199,22 @@ def pc(testsystem):
     LineInfo = DataFrame()
     GenInfo = DataFrame()
     dispatch_peerG = {}
+    max_penalty_delta = 0
+    max_nuc_delta = 0
+    min_trade_price = 0
+    penalty_old = {}
+    for w in trades:
+        penalty_old[w] = 0
     for i in generators:
         dispatch_peerG[i] = 0
+    penalty_iter = 0
     outer_iter = 0
 
     # need to add timer code for performance assessment
     # Outer loop of iterative process
     while True:
         # print("Outer loop")
+        outer_iter += 1
         accepted = {}
         rejected = {}
         pg = {}
@@ -157,11 +225,28 @@ def pc(testsystem):
         Cost_DG = {}
         trades_old = trades
         trades_selected_old = trades_selected
+        trade_prices = []
+        trade_penalty_deltas = []
         for w in trades:
-            trades[w].Pes = 0
-            trades[w].Peb = 0
+            trade_prices.append(trades[w].Pes)
+            trade_penalty_deltas.append(
+                abs(trades[w].penalty - penalty_old[w]))
+        min_trade_price = min(trade_prices)
+        max_penalty_delta = max(trade_penalty_deltas)
+        # set trade prices as the minimum final price minus max delta
+        for w in trades:
+            trades[w].Pes = min_trade_price - max_penalty_delta - max_nuc_delta
+            trades[w].Peb = min_trade_price - max_penalty_delta - max_nuc_delta
+            # trades[w].Pes = trades[w].Pes - max_penalty_delta - max_nuc_delta
+            # trades[w].Peb = trades[w].Peb - max_penalty_delta - max_nuc_delta
+            if trades[w].Pes < 0:
+                trades[w].Pes = 0
+            if trades[w].Peb < 0:
+                trades[w].Peb = 0
+            penalty_old[w] = trades[w].penalty
             trades[w].cleared = 0
-        outer_iter += 1
+        max_penalty_delta = 0
+        max_nuc_delta = 0
         # Inner loop for negotiation of trades
         while True:
             # print("Inner loop")
@@ -171,6 +256,7 @@ def pc(testsystem):
 
             gap = 1e-3
             for agentID in agents:
+                print("agent: " + str(agentID) + " iter: " + str(outer_iter))
                 status, temp_accepted, temp_rejected, temp_pg, Revenue_Sell, \
                     Cost_Buy, Cost_Network, Cost_Penalty, Cost_DG, model = \
                     selecttrade(trades, agents, agentID, gap, trade_scale)
@@ -179,10 +265,11 @@ def pc(testsystem):
                 pg[agentID] = temp_pg
 
                 if status != 2:
-                    return [], model
+                    print("error with select trade")
+                    return trades, agents, model, agentID, trade_scale
 
             # price delta = $5/MWh = $0.005/kWh
-            deltaP = 1
+            # deltaP = 1
             # Update trade prices according to presence in optimal sets
             # Note price only increases and so may overshoot optimal
             changestate = 0
@@ -194,9 +281,17 @@ def pc(testsystem):
                         trades[w].Pes += deltaP
                     else:
                         trades[w].Peb += deltaP
+                # Clear trades as agreed.
                 if (w in accepted[trades[w].Ab]) \
-                        and (w in accepted[trades[w].As]):
+                        and (w in accepted[trades[w].As]) and clearing == 1:
                     trades[w].cleared = 1
+                print(trades[w].tradeID, trades[w].As, trades[w].Ab,
+                      trades[w].Pes, trades[w].Peb, trades[w].costNw,
+                      trades[w].penalty,
+                      trades[w].Peb+trades[w].penalty+trades[w].costNw,
+                      w in accepted[trades[w].As], w in accepted[trades[w].Ab],
+                      trades[w].cleared)
+
             diff = -1
             if not trades:
                 diff = 0
@@ -255,11 +350,17 @@ def pc(testsystem):
         if status == 2:
             # For all trades, update network charge
             for w in trades:
-                trades[w].costNw = (
-                    dlmp[agents[trades[w].Ab].location]
-                    - dlmp[agents[trades[w].As].location])/2
+                costNwold = trades[w].costNw
+                # trades[w].costNw = (
+                #     dlmp[agents[trades[w].Ab].location]
+                #     - dlmp[agents[trades[w].As].location])/2
+                costNwdelta = abs(costNwold - trades[w].costNw)
+                # track largest abs nuc change
+                if costNwdelta > max_nuc_delta:
+                    max_nuc_delta = costNwdelta
         # Trade state infeasible, update network charge
         else:
+            penalty_iter += 1
             NodeState = NodeInfo.loc['status']
             LineState = LineInfo.loc['status']
             print(NodeState, LineState)
@@ -300,19 +401,19 @@ def pc(testsystem):
                     #  penpool is defined as the some of ptdf for bad trades
                     penpool = 0
                     if LineState[li] == -1:
-                        penpool = bwptdfsum/2
+                        penpool = bwptdfsum/pen_scale
                     elif LineState[li] == 1:
-                        penpool = fwptdfsum/2
+                        penpool = fwptdfsum/pen_scale
                     # Testing code to set penalty at advanced state
                     # Remove for final code/model
-                    if outer_iter == 1:
+                    if penalty_iter == 1:
                         for w in trades:
                             wptdf = round(ptdf[li, agents[trades[w].As].location,
                                                agents[trades[w].Ab].location], 4)
                             if wptdf > 0:
-                                trades[w].penalty += 40
+                                trades[w].penalty += pen_start
                             elif wptdf < 0:
-                                trades[w].penalty += 40
+                                trades[w].penalty += 0
                     # end of code to remove
 
                     for w in trades:
@@ -550,10 +651,10 @@ def pc(testsystem):
 
     for m in B_d:
         demand_P2P[m] = sum(trades_dis[n, m] for n in B_g)
-        ep_u[m] = (buses[m].Pd - demand_P2P[m])*dlmp[m]
+        ep_u[m] = (buses[m].Pd - demand_P2P[m])*dlmp[m]*trade_scale
 
     for w in trades_selected:
-        ep_p[agents[trades[w].Ab].location] += trades[w].Pes
+        ep_p[agents[trades[w].Ab].location] += trades[w].Pes*trade_scale
         nuc[agents[trades[w].Ab].location] += 0.5*trades[w].costNw*trade_scale
         nuc[agents[trades[w].As].location] += 0.5*trades[w].costNw*trade_scale
         pen[agents[trades[w].Ab].location] += trades[w].penalty*trade_scale
@@ -579,6 +680,30 @@ def pc(testsystem):
     sum_nuc = sum(nuc[b] for b in buses)
     sum_pen = sum(pen[b] for b in buses)
 
+    trades_mat = {}
+    trades_mat["tradeID"] = []
+    trades_mat["As"] = []
+    trades_mat["Ab"] = []
+    trades_mat["Pes"] = []
+    trades_mat["Peb"] = []
+    trades_mat["costNw"] = []
+    trades_mat["penalty"] = []
+    trades_mat["cleared"] = []
+    for w in trades:
+        trades_mat["tradeID"].append(trades[w].tradeID)
+        trades_mat["As"].append(trades[w].As)
+        trades_mat["Ab"].append(trades[w].Ab)
+        trades_mat["Pes"].append(trades[w].Pes)
+        trades_mat["Peb"].append(trades[w].Peb)
+        trades_mat["costNw"].append(trades[w].costNw)
+        trades_mat["penalty"].append(trades[w].penalty)
+        if w in trades_selected:
+            trades_mat["cleared"].append(1)
+        else:
+            trades_mat["cleared"].append(0)
+
+    trades_frame = DataFrame(data=trades_mat)
+
     cashflow_mat = DataFrame([ep_p, ep_u, nuc, pen, ur, cp],
                              index=['ep_p', 'ep_u', 'nuc', 'pen', 'ur', 'cp'])
     cashflow_sum = DataFrame([sum_cp, sum_ep_p, sum_ep_u,
@@ -589,6 +714,7 @@ def pc(testsystem):
 
     data_mat = DataFrame([trades_dis, nwcharge_dis, echarge_dis],
                          index=['trades_dis', 'nwcharge_dis', 'echarge_dis'])
+    data_mat = data_mat.transpose()
 
     print("partlevel = ", partlevel)
     print("status = ", status)
@@ -599,23 +725,32 @@ def pc(testsystem):
     print("min dlmp = ", round(min(dlmp[b] for b in buses), 3))
     method = "pc"
 
+    options = "_"+str(trade_scale)+"_"+str(deltaP)+"_"+str(pen_scale) + \
+        "_"+str(pen_start)+"_"+str(clearing)
+
     basefile = "C:\\Users\\Colton\\github\\py2P\\results\\"
-    busfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_busframe.csv"
-    nodefile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_nodeframe.csv"
-    linefile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_lineframe.csv"
-    dlmpfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_dlmpframe.csv"
-    genfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_genframe.csv"
-    cashflowmatfile = basefile+method+"_" + \
-        testsystem+"_"+str(100*partlevel)+"_cfmat.csv"
-    cashflowsumfile = basefile+method+"_" + \
-        testsystem+"_"+str(100*partlevel)+"_cfsum.csv"
-    datafile = basefile+method+"_" + \
-        testsystem+"_"+str(100*partlevel)+"_data.csv"
+    dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+options
+    busfile = dirname+"\\"+method+"_"+testsystem + \
+        "_"+str(100*partlevel)+options+"_busframe.csv"
+    nodefile = dirname+"\\"+method+"_"+testsystem + \
+        "_"+str(100*partlevel)+options+"_nodeframe.csv"
+    linefile = dirname+"\\"+method+"_"+testsystem + \
+        "_"+str(100*partlevel)+options+"_lineframe.csv"
+    dlmpfile = dirname+"\\"+method+"_"+testsystem + \
+        "_"+str(100*partlevel)+options+"_dlmpframe.csv"
+    genfile = dirname+"\\"+method+"_"+testsystem + \
+        "_"+str(100*partlevel)+options+"_genframe.csv"
+    cashflowmatfile = dirname+"\\"+method+"_" + \
+        testsystem+"_"+str(100*partlevel)+options+"_cfmat.csv"
+    cashflowsumfile = dirname+"\\"+method+"_" + \
+        testsystem+"_"+str(100*partlevel)+options+"_cfsum.csv"
+    datafile = dirname+"\\"+method+"_" + \
+        testsystem+"_"+str(100*partlevel)+options+"_data.csv"
+    tradefile = dirname+"\\"+method+"_"+testsystem + \
+        "_"+str(100*partlevel)+options+"_trades.csv"
+
+    makedirs(dirname, exist_ok=True)
     bus_frame.to_csv(busfile)
     cashflow_mat.to_csv(cashflowmatfile)
     cashflow_sum.to_csv(cashflowsumfile)
@@ -624,5 +759,6 @@ def pc(testsystem):
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
     data_mat.to_csv(datafile)
+    trades_frame.to_csv(tradefile)
 
     return dispatch_stack, dlmp_stack, trades, trades_selected, agents

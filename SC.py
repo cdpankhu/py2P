@@ -4,8 +4,10 @@ from py2P.NetworkLoad import networkload
 from py2P.DLMP import calculatedlmp
 from py2P.Coefficients import calculateptdf, makeYbus
 from py2P.makeModel import makeModel
-from math import pow, sqrt
+from math import pow, sqrt, floor
 from gurobipy import Model, GRB
+from time import strftime
+from os import makedirs
 
 
 def sc(testsystem):
@@ -66,16 +68,18 @@ def sc(testsystem):
 
     sbase = generators[1].mBase
 
-    m = makeModel(buses, generators, lines, gensetP, gensetU, SC=1, gam=gam)
+    model = makeModel(buses, generators, lines,
+                      gensetP, gensetU, SC=1, gam=gam)
 
-    m.optimize()
+    model.optimize()
 
-    status = m.Status
+    status = model.Status
 
-    var = m.getVars()
+    var = model.getVars()
+    constrs = model.getConstrs()
 
     # Extracting variable results into arrays
-    obj_value = m.ObjVal
+    obj_value = model.ObjVal
     varCount = 0
     v = {}
     for b in buses:
@@ -114,7 +118,7 @@ def sc(testsystem):
     pnm = {}
     for i in buses:
         for j in buses:
-            if abs(var[varCount].x) > 1e-3:
+            if abs(var[varCount].x) > 1e-6:
                 pnm[i, j] = var[varCount].x*sbase
             else:
                 pnm[i, j] = 0
@@ -130,12 +134,23 @@ def sc(testsystem):
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
 
+    constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
+        len(buses) + len(buses) + 1 + len(generators) + len(lines) + 1
+    dual_pbalance = {}
+    for b in buses:
+        dual_pbalance[b] = constrs[constrCount].Pi
+        constrCount += 1
+
     DLMPInfo = DataFrame()
     NodeInfo = DataFrame()
     LineInfo = DataFrame()
     GenInfo = DataFrame()
 
     dispatch = pg
+    print("dispatch1=:", dispatch)
+    # trade_scale is kW
+    # for i in dispatch:
+    #     dispatch[i] = floor(dispatch[i]*10**3)/(10**3)
     SMP = generators[root].cost[1]
     status1, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
         calculatedlmp(
@@ -203,10 +218,11 @@ def sc(testsystem):
     cashflow_mat = DataFrame([ep_p, ep_u, nuc, ur, cp],
                              index=['ep_p', 'ep_u', 'nuc', 'ur', 'cp'])
     cashflow_sum = DataFrame([sum_cp, sum_ep_p, sum_ep_u, sum_nuc,
-                              sum_dgr, sum_dgp, up],
+                              sum_gc_p, sum_gc_u, up],
                              index=['sum_cp', 'sum_ep_p', 'sum_ep_u', 'sum_nuc',
-                                    'sum_dgr', 'sum_dgp', 'up'])
+                                    'sum_ocp', 'sum_ocu', 'up'])
     data_mat = DataFrame([pnm], index=["trades_dis"])
+    data_mat = data_mat.transpose()
 
     print("partlevel = ", partlevel)
     print("status = ", status)
@@ -218,22 +234,27 @@ def sc(testsystem):
     method = "sc"
 
     basefile = "C:\\Users\\Colton\\github\\py2P\\results\\"
-    busfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_busframe.csv"
-    nodefile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_nodeframe.csv"
-    linefile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_lineframe.csv"
-    dlmpfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_dlmpframe.csv"
-    genfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_genframe.csv"
-    cashflowmatfile = basefile+method+"_" + \
+    dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)
+
+    busfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_busframe.csv"
+    nodefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_nodeframe.csv"
+    linefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_lineframe.csv"
+    dlmpfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_dlmpframe.csv"
+    genfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_genframe.csv"
+    cashflowmatfile = dirname+"\\"+method+strftime("%Y-%m-%d-%H-%M-%S_")+"_" + \
         testsystem+"_"+str(100*partlevel)+"_cfmat.csv"
-    cashflowsumfile = basefile+method+"_" + \
+    cashflowsumfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
         testsystem+"_"+str(100*partlevel)+"_cfsum.csv"
-    datafile = basefile+method+"_" + \
+    datafile = dirname+"\\"+method+strftime("%Y-%m-%d-%H-%M-%S_")+"_" + \
         testsystem+"_"+str(100*partlevel)+"_data.csv"
+
+    makedirs(dirname, exist_ok=True)
     bus_frame.to_csv(busfile)
     cashflow_mat.to_csv(cashflowmatfile)
     cashflow_sum.to_csv(cashflowsumfile)
@@ -243,4 +264,4 @@ def sc(testsystem):
     GenInfo.to_csv(genfile)
     data_mat.to_csv(datafile)
 
-    return pnm, dlmp
+    return pnm, dlmp, model

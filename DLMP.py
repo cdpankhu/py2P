@@ -9,7 +9,7 @@ from py2P.makeModel import makeModel
 def calculatedlmp(
         dispatch, buses, generators, lines, SMP, gensetP, gensetU, **optional):
 
-    print(dispatch)
+    print("dispatch:", dispatch)
     # Consider reducing cyclomatic complexity by moving shadow price extraction
     B_gn = {}
     for i in buses:
@@ -45,6 +45,9 @@ def calculatedlmp(
         return status, {}, {}, NodeInfo, LineInfo, {}, {}
 
     var = m.getVars()
+    # Getting constraint duals
+    constrs = m.getConstrs()
+    qconstrs = m.getQConstrs()
 
     # Extracting variable results into arrays
     obj_value = m.ObjVal
@@ -90,10 +93,6 @@ def calculatedlmp(
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
 
-    # Getting constraint duals
-    constrs = m.getConstrs()
-    qconstrs = m.getQConstrs()
-
     # Getting quadratic constraint duals
     qconstrCount = 0
     dual_linecapfw = {}
@@ -125,7 +124,6 @@ def calculatedlmp(
     for b in buses:
         dual_pbalance[b] = constrs[constrCount].Pi
         constrCount += 1
-    print(dual_pbalance)
     dual_qbalance = {}
     for b in buses:
         dual_qbalance[b] = constrs[constrCount].Pi

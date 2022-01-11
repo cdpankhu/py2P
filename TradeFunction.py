@@ -25,6 +25,7 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     # Trade Set W
     m = Model("selecttrade")
     m.Params.OutputFlag = 0
+    m.Params.DualReductions = 0
     # Create variables
     # Note, need to add constraint/variable for utility of marginal demand
     pg = m.addVar(name="pg", lb=A[agentID].pgMin, ub=A[agentID].pgMax)
@@ -90,10 +91,10 @@ def selecttrade(W, A, agentID, gap, trade_scale):
     # Run optimization
     for i in W:
         if not (W[i].As == agentID or W[i].Ab == agentID):
-            m.addConstr(u[i] == 0)
+            m.addConstr(u[i] == 0, 'c7['+str(i)+"]")
         else:
             if W[i].cleared == 1:
-                m.addConstr(u[i] == 1)
+                m.addConstr(u[i] == 1, 'c8['+str(i)+"]")
 
     m.update()
 

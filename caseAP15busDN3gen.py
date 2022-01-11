@@ -8,7 +8,7 @@
 from numpy import array
 
 
-def caseAP15busDN():
+def caseAP15busDN3gen():
     """Power flow data for 9 bus, 3 generator case.
     Please see L{caseformat} for details on the case file format.
     Based on data from Joe H. Chow's book, p. 70.
@@ -48,6 +48,8 @@ def caseAP15busDN():
          0, 0, 0, 0, 0, 0, 0, 0, 0],
         [1,  1, 0, 2,    -2,    1, 1, 1, 2,    0, 0, 0,
          0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [7, 0.1, 0, 0.1,  -0.1,  1, 1, 1, 0.1,  0, 0, 0,
+         0, 0, 0, 0, 0, 0, 0, 0, 0],
         [12, 0.256, 0, 0.4,  -0.4,  1, 1, 1, 0.4,  0, 0, 0,
          0, 0, 0, 0, 0, 0, 0, 0, 0]
     ])
@@ -84,6 +86,7 @@ def caseAP15busDN():
     ppc["gencost"] = array([
         [2, 0, 0, 3, 0, 50, 0],
         [2, 0, 0, 3, 0, 20, 0],
+        [2, 0, 0, 3, 0, 15, 0],
         [2, 0, 0, 3, 0, 10, 0]
     ])
 

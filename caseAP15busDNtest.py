@@ -8,7 +8,7 @@
 from numpy import array
 
 
-def caseAP15busDN():
+def caseAP15busDNtest():
     """Power flow data for 9 bus, 3 generator case.
     Please see L{caseformat} for details on the case file format.
     Based on data from Joe H. Chow's book, p. 70.
@@ -83,8 +83,8 @@ def caseAP15busDN():
     # 2 startup shutdown n c(n-1) ... c0
     ppc["gencost"] = array([
         [2, 0, 0, 3, 0, 50, 0],
-        [2, 0, 0, 3, 0, 20, 0],
-        [2, 0, 0, 3, 0, 10, 0]
+        [2, 0, 0, 3, 5, 20, 0],
+        [2, 0, 0, 3, 6.25, 10, 0]
     ])
 
     return ppc

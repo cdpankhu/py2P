@@ -135,7 +135,7 @@ def makeModel(buses, generators, lines, gensetP, gensetU, **optional):
         name="socp"
     )
 
-    # Voltage contraint for root node
+    # Voltage constraint for root node
     for g in generators:
         if generators[g].gtype == "Root":
             m.addConstr(v[generators[g].location] == pow(generators[g].Vg, 2),
@@ -204,6 +204,19 @@ def makeModel(buses, generators, lines, gensetP, gensetU, **optional):
             (optional['dispatch'][g]/sbase == pg[g] for g in gensetP),
             name="genpower"
             )
+
+    # if 'SC' in optional:
+    #     m.addConstr(pnm[12, 11] == 0.0217)
+    #     m.addConstr(pnm[12, 10] == 0.0229)
+    #     m.addConstr(pnm[12, 9] == 0.0235)
+    #     m.addConstr(pnm[12, 8] == 0.0219)
+    #     m.addConstr(pnm[12, 7] == 0.0219)
+    #     m.addConstr(pnm[12, 6] == 0.0291)
+    #     m.addConstr(pnm[12, 5] == 0.0173)
+    #     m.addConstr(pnm[12, 4] == 0.0201)
+    #     m.addConstr(pnm[12, 2] == 0.0756)
+    #     m.addConstr(pnm[12, 2] == 0.254)
+
     m.Params.QCPDual = 1
     m.Params.BarQCPConvTol = 1e-7
     m.update()
