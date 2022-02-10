@@ -236,10 +236,10 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         max_penalty_delta = max(trade_penalty_deltas)
         # set trade prices as the minimum final price minus max delta
         for w in trades:
-            # trades[w].Pes = min_trade_price - max_penalty_delta - max_nuc_delta
-            # trades[w].Peb = min_trade_price - max_penalty_delta - max_nuc_delta
-            trades[w].Pes = 0
-            trades[w].Peb = 0
+            trades[w].Pes = trades[w].Pes - max_penalty_delta - max_nuc_delta
+            trades[w].Peb = trades[w].Peb - max_penalty_delta - max_nuc_delta
+            # trades[w].Pes = trades[w].Pes - max_penalty_delta - max_nuc_delta
+            # trades[w].Peb = trades[w].Peb - max_penalty_delta - max_nuc_delta
             if trades[w].Pes < 0:
                 trades[w].Pes = 0
             if trades[w].Peb < 0:
@@ -248,60 +248,47 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             trades[w].cleared = 0
         max_penalty_delta = 0
         max_nuc_delta = 0
-        # Inner loop for negotiation of trades
-        while True:
-            # print("Inner loop")
-            accepted = {}
-            rejected = {}
-            pg = {}
 
-            gap = 1e-3
-            for agentID in agents:
-                print("agent: " + str(agentID) + " iter: " + str(outer_iter))
-                status, temp_accepted, temp_rejected, temp_pg, Revenue_Sell, \
-                    Cost_Buy, Cost_Network, Cost_Penalty, Cost_DG, model = \
-                    selecttrade(trades, agents, agentID, gap, trade_scale)
-                accepted[agentID] = temp_accepted
-                rejected[agentID] = temp_rejected
-                pg[agentID] = temp_pg
+        # Old inner loop, select optimal set of trades
+        accepted = {}
+        rejected = {}
+        pg = {}
 
-                if status != 2:
-                    print("error with select trade")
-                    return trades, agents, model, agentID, trade_scale
+        gap = 1e-3
+        for agentID in agents:
+            print("agent: " + str(agentID) + " iter: " + str(outer_iter))
+            status, temp_accepted, temp_rejected, temp_pg, Revenue_Sell, \
+                Cost_Buy, Cost_Network, Cost_Penalty, Cost_DG, model = \
+                selecttrade(trades, agents, agentID, gap, trade_scale)
+            accepted[agentID] = temp_accepted
+            rejected[agentID] = temp_rejected
+            pg[agentID] = temp_pg
 
-            # price delta = $5/MWh = $0.005/kWh
-            # deltaP = 1
-            # Update trade prices according to presence in optimal sets
-            # Note price only increases and so may overshoot optimal
-            changestate = 0
-            for w in trades:
-                if (w in accepted[trades[w].Ab]) \
-                        and not (w in accepted[trades[w].As]):
-                    changestate = 1
-                    if trades[w].Peb > trades[w].Pes:
-                        trades[w].Pes += deltaP
-                    else:
-                        trades[w].Peb += deltaP
-                # Clear trades as agreed.
-                if (w in accepted[trades[w].Ab]) \
-                        and (w in accepted[trades[w].As]) and clearing == 1:
-                    trades[w].cleared = 1
-                # print(trades[w].tradeID, trades[w].As, trades[w].Ab,
-                #       trades[w].Pes, trades[w].Peb, trades[w].costNw,
-                #       trades[w].penalty,
-                #       trades[w].Peb+trades[w].penalty+trades[w].costNw,
-                #       w in accepted[trades[w].As], w in accepted[trades[w].Ab],
-                #       trades[w].cleared)
+            if status != 2:
+                print("error with select trade")
+                return trades, agents, model, agentID, trade_scale
 
-            diff = -1
-            if not trades:
-                diff = 0
-            else:
-                diff = sum((w in accepted[trades[w].Ab]) and not (
-                    w in accepted[trades[w].As]) for w in trades)
-
-            if changestate == 0:
-                break
+        # Update trade prices according to presence in optimal sets
+        # Note price only increases and so may overshoot optimal
+        changestate = 0
+        for w in trades:
+            if (w in accepted[trades[w].Ab]) \
+                    and not (w in accepted[trades[w].As]):
+                changestate = 1
+                if trades[w].Peb > trades[w].Pes:
+                    trades[w].Pes += deltaP
+                else:
+                    trades[w].Peb += deltaP
+            # Clear trades as agreed.
+            if (w in accepted[trades[w].Ab]) \
+                    and (w in accepted[trades[w].As]) and clearing == 1:
+                trades[w].cleared = 1
+            print(trades[w].tradeID, trades[w].As, trades[w].Ab,
+                  trades[w].Pes, trades[w].Peb, trades[w].costNw,
+                  trades[w].penalty, trades[w].Pes-trades[w].costNw,
+                  trades[w].Peb+trades[w].penalty+trades[w].costNw,
+                  w in accepted[trades[w].As], w in accepted[trades[w].Ab],
+                  trades[w].cleared)
 
         trades_selected = []
         trades_rest = []
@@ -348,7 +335,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
 
         # Update network charge
         # Trade state is feasible and DLMPs become network charges
-        if status == 2:
+        if status == 2 and changestate == 0:
             # For all trades, update network charge
             for w in trades:
                 costNwold = trades[w].costNw
@@ -360,7 +347,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                 if costNwdelta > max_nuc_delta:
                     max_nuc_delta = costNwdelta
         # Trade state infeasible, update network charge
-        else:
+        elif changestate == 0:
             penalty_iter += 1
             NodeState = NodeInfo.loc['status']
             LineState = LineInfo.loc['status']
@@ -373,13 +360,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                 calculatedlmp(dispatch_peerG, buses, generators, lines,
                               SMP, gensetP, gensetU, NodeInfo=NodeState,
                               LineInfo=LineState)
-            # Update nuc with relaxed DLMPs
-            # if status2 == 2:
-            #     for w in trades:
-            #         trades[w].costNw = (
-            #             dlmp[agents[trades[w].Ab].location]
-            #             - dlmp[agents[trades[w].As].location])/2
-            # Update penalty for ALL trades according to proportional
+            # Update penalty for trades according to proportional
             # contribution to violated flow limits via ptdfs
             for li in lines:
                 if LineState[li] != 0:
@@ -428,12 +409,12 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                             trades[w].penalty += (LineState[li] * penpool
                                                   * wptdf / bwptdfsum)
                     for w in trades:
-                        print(w, li, LineState[li], agents[trades[w].As].location,
+                        print(li, LineState[li], agents[trades[w].As].location,
                               agents[trades[w].Ab].location, trades[w].Pes,
                               trades[w].Peb, trades[w].costNw,
                               trades[w].penalty,
                               trades[w].costNw+trades[w].penalty,
-                              w in trades_selected)
+                              trades[w].cleared)
             if nodestatus != 0:
                 vm_p_sc, vm_q_sc, va_p_sc, va_q_sc = makeJacVSC(
                     ppc, NodeInfo.loc['v'], NodeInfo.loc['theta'])
@@ -456,6 +437,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                             elif wvsc < 0:
                                 trades[w].penalty += NodeState[b] * \
                                     wvsc * penpool / vsc_neg_sum
+
         dispatch_temp = {}
         dlmp_temp = {}
         pnm_temp = {}
@@ -471,12 +453,13 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             dispatch_temp[i] = dispatch[i]
         for i in dlmp:
             dlmp_temp[i] = dlmp[i]
-        dispatch_stack.append(dispatch_temp)
-        dlmp_stack.append(dlmp_temp)
-        pnm_stack.append(pnm_temp)
+        if changestate == 0:
+            dispatch_stack.append(dispatch_temp)
+            dlmp_stack.append(dlmp_temp)
+            pnm_stack.append(pnm_temp)
 
         # If gencon is unchanged, break while loop
-        if gencon_old == gencon and status == 2:
+        if gencon_old == gencon and status == 2 and changestate == 0:
             break
         else:
             for d in dispatch:
@@ -734,7 +717,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     print("min voltage = ", round(min(voltage[b] for b in buses), 3))
     print("max dlmp = ", round(max(dlmp[b] for b in buses), 3))
     print("min dlmp = ", round(min(dlmp[b] for b in buses), 3))
-    method = "pc"
+    method = "pc2"
 
     options = "_"+str(trade_scale)+"_"+str(deltaP)+"_"+str(pen_scale) + \
         "_"+str(pen_start)+"_"+str(clearing)

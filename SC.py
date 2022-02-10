@@ -264,4 +264,4 @@ def sc(testsystem):
     GenInfo.to_csv(genfile)
     data_mat.to_csv(datafile)
 
-    return pnm, dlmp, model
+    return pnm, dlmp
