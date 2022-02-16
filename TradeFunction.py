@@ -95,6 +95,8 @@ def selecttrade(W, A, agentID, gap, trade_scale):
         else:
             if W[i].cleared == 1:
                 m.addConstr(u[i] == 1, 'c8['+str(i)+"]")
+            if W[i].blocked == 1:
+                m.addConstr(u[i] == 0, 'c9['+str(i)+"]")
 
     m.update()
 

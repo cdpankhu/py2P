@@ -1,5 +1,5 @@
 # PC.py
-from pandas import DataFrame
+from pandas import DataFrame, Series
 from py2P.P2PTradeType import Agent
 from py2P.NetworkLoad import networkload
 from py2P.TradeFunction import generatetrade, selecttrade
@@ -11,6 +11,7 @@ from py2P.SC import sc
 from math import pow, sqrt
 from time import strftime
 from os import makedirs
+from numpy import sign
 
 
 def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
@@ -191,6 +192,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         gencon_old[i] = 0
         dispatch_old[i] = 0
     status = 0
+    status_old = 0
     dlmp = {}
     dlmp_stack = []
     dispatch_stack = []
@@ -199,6 +201,10 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     NodeInfo = DataFrame()
     LineInfo = DataFrame()
     GenInfo = DataFrame()
+    LineState = Series()
+    NodeState = Series()
+    LineState_old = Series()
+    NodeState_old = Series()
     dispatch_peerG = {}
     max_penalty_delta = 0
     max_nuc_delta = 0
@@ -210,6 +216,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         dispatch_peerG[i] = 0
     penalty_iter = 0
     outer_iter = 0
+    changestate = 0
 
     # need to add timer code for performance assessment
     # Outer loop of iterative process
@@ -224,10 +231,15 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         Cost_Network = {}
         Cost_Penalty = {}
         Cost_DG = {}
-        trades_old = trades
-        trades_selected_old = trades_selected
         trade_prices = []
         trade_penalty_deltas = []
+        if changestate == 0:
+            trades_old = trades
+            trades_selected_old = trades_selected
+            trades_rest_old = trades_rest
+            status_old = status
+            LineState_old = LineState
+            NodeState_old = NodeState
         for w in trades:
             trade_prices.append(trades[w].Pes)
             trade_penalty_deltas.append(
@@ -236,8 +248,6 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         max_penalty_delta = max(trade_penalty_deltas)
         # set trade prices as the minimum final price minus max delta
         for w in trades:
-            trades[w].Pes = trades[w].Pes - max_penalty_delta - max_nuc_delta
-            trades[w].Peb = trades[w].Peb - max_penalty_delta - max_nuc_delta
             # trades[w].Pes = trades[w].Pes - max_penalty_delta - max_nuc_delta
             # trades[w].Peb = trades[w].Peb - max_penalty_delta - max_nuc_delta
             if trades[w].Pes < 0:
@@ -245,7 +255,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             if trades[w].Peb < 0:
                 trades[w].Peb = 0
             penalty_old[w] = trades[w].penalty
-            trades[w].cleared = 0
+            # trades[w].cleared = 0
         max_penalty_delta = 0
         max_nuc_delta = 0
 
@@ -283,18 +293,31 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             if (w in accepted[trades[w].Ab]) \
                     and (w in accepted[trades[w].As]) and clearing == 1:
                 trades[w].cleared = 1
-            print(trades[w].tradeID, trades[w].As, trades[w].Ab,
-                  trades[w].Pes, trades[w].Peb, trades[w].costNw,
-                  trades[w].penalty, trades[w].Pes-trades[w].costNw,
-                  trades[w].Peb+trades[w].penalty+trades[w].costNw,
-                  w in accepted[trades[w].As], w in accepted[trades[w].Ab],
-                  trades[w].cleared)
+            # print(trades[w].tradeID, trades[w].As, trades[w].Ab,
+            #       trades[w].Pes, trades[w].Peb, trades[w].costNw,
+            #       trades[w].penalty, trades[w].Pes-trades[w].costNw,
+            #       trades[w].Peb+trades[w].penalty+trades[w].costNw,
+            #       w in accepted[trades[w].As], w in accepted[trades[w].Ab],
+            #       trades[w].cleared)
 
         trades_selected = []
         trades_rest = []
         for w in trades:
             if (w in accepted[trades[w].Ab]) and (w in accepted[trades[w].As]):
-                trades_selected.append(w)
+                # trades_selected.append(w)
+                if len(trades_selected) == 0:
+                    trades_selected.append(w)
+                else:
+                    inserted = 0
+                    for i in range(len(trades_selected)):
+                        # insert prior to trade which costNw is less than
+                        if trades[w].costNw < trades[trades_selected[i]].costNw:
+                            trades_selected.insert(i, w)
+                            inserted = 1
+                            break
+                    # costNw is greater than all others, put at end of list
+                    if inserted == 0:
+                        trades_selected.append(w)
             else:
                 trades_rest.append(w)
 
@@ -346,7 +369,9 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                 # track largest abs nuc change
                 if costNwdelta > max_nuc_delta:
                     max_nuc_delta = costNwdelta
-        # Trade state infeasible, update network charge
+        # Trade state infeasible, update penalty on violated trades
+        # Trades are successsively removed from the trade stack according to
+        # highest network charges first
         elif changestate == 0:
             penalty_iter += 1
             NodeState = NodeInfo.loc['status']
@@ -403,18 +428,22 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                                            agents[trades[w].Ab].location], 4)
 
                         if wptdf > 0:
-                            trades[w].penalty += (LineState[li] * penpool
-                                                  * wptdf / fwptdfsum)
+                            # trades[w].penalty += (LineState[li] * penpool
+                            #                       * wptdf / fwptdfsum)
+                            trades[w].penalty += LineState[li] * wptdf \
+                                                 * pen_scale
                         elif wptdf < 0:
-                            trades[w].penalty += (LineState[li] * penpool
-                                                  * wptdf / bwptdfsum)
-                    for w in trades:
-                        print(li, LineState[li], agents[trades[w].As].location,
-                              agents[trades[w].Ab].location, trades[w].Pes,
-                              trades[w].Peb, trades[w].costNw,
-                              trades[w].penalty,
-                              trades[w].costNw+trades[w].penalty,
-                              trades[w].cleared)
+                            # trades[w].penalty += (LineState[li] * penpool
+                            #                       * wptdf / bwptdfsum)
+                            trades[w].penalty += LineState[li] * wptdf \
+                                                 * pen_scale
+                    # for w in trades:
+                    #     print(li, LineState[li], agents[trades[w].As].location,
+                    #           agents[trades[w].Ab].location, trades[w].Pes,
+                    #           trades[w].Peb, trades[w].costNw,
+                    #           trades[w].penalty,
+                    #           trades[w].costNw+trades[w].penalty,
+                    #           trades[w].cleared)
             if nodestatus != 0:
                 vm_p_sc, vm_q_sc, va_p_sc, va_q_sc = makeJacVSC(
                     ppc, NodeInfo.loc['v'], NodeInfo.loc['theta'])
@@ -458,7 +487,63 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             dlmp_stack.append(dlmp_temp)
             pnm_stack.append(pnm_temp)
 
-        # If gencon is unchanged, break while loop
+        # Stable solution shifted from feasible to infeasible after penalty
+        # Revert penalty back once and lock in trades for congested line
+        if status == 2 and changestate == 0 and status_old != 2:
+            print(LineState, LineState_old)
+            for li in lines:
+                if LineState_old[li] != 0:
+                    line_limit = lines[li].u * LineState_old[li]
+                    line_loading = 0
+                    line_violation = 0
+                    # First accept all trades in the non-violating direction
+                    for w in trades_selected_old:
+                        wptdf = round(ptdf[li, agents[trades[w].As].location,
+                                           agents[trades[w].Ab].location], 4)
+
+                        if wptdf != 0 and sign(wptdf) != sign(LineState[li]):
+                            trades[w].penalty -= LineState_old[li] * wptdf \
+                                                 * pen_scale
+                            line_loading += wptdf*trade_scale
+                            # Lock congestion on that line
+                            trades[w].cleared = 1
+                    # Accept violating trades until the line flow is violated
+                    for w in trades_selected_old:
+                        wptdf = round(ptdf[li, agents[trades[w].As].location,
+                                           agents[trades[w].Ab].location], 4)
+
+                        if wptdf != 0 and sign(wptdf) == sign(LineState[li]):
+                            line_loading += wptdf*trade_scale
+                            if line_limit > 0 and line_loading >= line_limit:
+                                line_violation = 1
+                            elif line_limit < 0 and line_loading <= line_limit:
+                                line_violation = 1
+                            if line_violation == 0:
+                                trades[w].penalty -= LineState_old[li] * wptdf \
+                                    * pen_scale
+                                # Lock that trade as being in the optimal set
+                                trades[w].cleared = 1
+                            else:
+                                trades[w].blocked = 1
+                    for w in trades_rest_old:
+                        wptdf = round(ptdf[li, agents[trades[w].As].location,
+                                           agents[trades[w].Ab].location], 4)
+
+                        if wptdf != 0:
+                            trades[w].blocked = 1
+            # for w in trades:
+            #     print(li, LineState_old[li], agents[trades[w].As].location,
+            #           agents[trades[w].Ab].location, trades[w].Pes,
+            #           trades[w].Peb, trades[w].costNw,
+            #           trades[w].penalty,
+            #           trades[w].costNw+trades[w].penalty,
+            #           trades[w].cleared)
+            # break
+
+        # if penalty_iter == 2 and changestate == 0:
+        #     break
+
+        # If gencon is unchanged, break while loop, feasible stable solution
         if gencon_old == gencon and status == 2 and changestate == 0:
             break
         else:
@@ -683,6 +768,10 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     trades_mat["costNw"] = []
     trades_mat["penalty"] = []
     trades_mat["cleared"] = []
+    trades_mat["blocked"] = []
+    trades_mat["passed"] = []
+    trades_mat['buyer_pay'] = []
+    trades_mat['seller_rev'] = []
     for w in trades:
         trades_mat["tradeID"].append(trades[w].tradeID)
         trades_mat["As"].append(trades[w].As)
@@ -691,10 +780,15 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         trades_mat["Peb"].append(trades[w].Peb)
         trades_mat["costNw"].append(trades[w].costNw)
         trades_mat["penalty"].append(trades[w].penalty)
+        trades_mat["cleared"].append(trades[w].cleared)
+        trades_mat["blocked"].append(trades[w].blocked)
         if w in trades_selected:
-            trades_mat["cleared"].append(1)
+            trades_mat["passed"].append(1)
         else:
-            trades_mat["cleared"].append(0)
+            trades_mat["passed"].append(0)
+        trades_mat['buyer_pay'].append(trades[w].Peb + trades[w].costNw
+                                       + trades[w].penalty)
+        trades_mat['seller_rev'].append(trades[w].Pes - trades[w].costNw)
 
     trades_frame = DataFrame(data=trades_mat)
 
@@ -754,5 +848,6 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     GenInfo.to_csv(genfile)
     data_mat.to_csv(datafile)
     trades_frame.to_csv(tradefile)
+    print(dirname)
 
     return dispatch_stack, dlmp_stack, pnm_stack, trades, trades_selected, agents
