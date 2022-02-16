@@ -1,5 +1,5 @@
 # Coefficients.py
-from numpy import diag, zeros, dot, transpose, delete, absolute
+from numpy import diag, zeros, dot, transpose, delete, absolute, complex128
 from numpy.linalg import inv
 from cmath import phase, rect
 from math import sqrt
@@ -98,6 +98,31 @@ def makeYbus(buses, lines):
                 Ybus[b, b] += -Ybus[fbus, tbus] + 1j*lines[li].b/2
 
     return Ybus
+
+
+def makeZbus(buses, lines):
+    numlines = len(lines)
+    numbus = len(buses)
+    Ybus = zeros([numbus, numbus], complex128)
+
+    for li in lines:
+        tbus = lines[li].tbus
+        fbus = lines[li].fbus
+        Ybus[tbus-1, fbus-1] = -1/complex(lines[li].r, lines[li].x)
+        Ybus[fbus-1, tbus-1] = Ybus[tbus-1, fbus-1]
+
+    for b in buses:
+        bus = int(b)
+        Ybus[bus-1, bus-1] = complex(buses[b].Gs, buses[b].Bs)
+        for li in lines:
+            tbus = lines[li].tbus
+            fbus = lines[li].fbus
+            if tbus == b or fbus == b:
+                Ybus[bus-1, bus-1] += -Ybus[fbus-1, tbus-1] + 1j*lines[li].b/2
+
+    Zbus = inv(Ybus)
+
+    return Zbus
 
 
 def calculatevsc(buses, lines, v, angles, root):
