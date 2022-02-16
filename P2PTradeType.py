@@ -8,6 +8,8 @@ class Trade:
         self.Peb = Peb
         self.As = As
         self.Ab = Ab
+        self.cleared = 0
+        self.blocked = 0
         self.costNw = costNw
         self.penalty = penalty
 

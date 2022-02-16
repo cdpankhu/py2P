@@ -5,10 +5,14 @@ from py2P.NetworkDataType import Bus, Line, Generator
 from pypower.api import \
     case118, case14, case24_ieee_rts, case30, case300, case30Q, case30pwl, \
     case39, case4gs, case57, case6ww, case9, case9Q, case9target
+from py2P.case9DN import case9DN
+from py2P.caseAP15busDN import caseAP15busDN
+from py2P.caseAP15busDNtest import caseAP15busDNtest
+from py2P.caseAP15busDN3gen import caseAP15busDN3gen
 
 
 def networkload(testsystem):
-    if testsystem == "AP15busDN":
+    if testsystem == "AP15busDN" or testsystem == "AP15busDN_M":
         usingMatPower = 0
     elif testsystem == "IEEE33busDN" or testsystem == "IEEE33busDN2" \
             or testsystem == "ISONE8busTN":
@@ -16,6 +20,8 @@ def networkload(testsystem):
     elif testsystem == "R2-25.00-1":
         usingMatPower = 0
     elif testsystem == "Test2Bus":
+        usingMatPower = 0
+    elif testsystem == "6BusWiley":
         usingMatPower = 0
     else:
         usingMatPower = 1
@@ -131,7 +137,7 @@ def networkload_nomatpower(testsystem):
     datamat["bus"] = busmat
     datamat["branch"] = branchmat
     datamat["gen"] = genmat
-    return buses, lines, generators, datamat
+    return buses, lines, generators, datamat, {}
 
 
 def networkload_matpower(testsystem):
@@ -202,7 +208,7 @@ def networkload_matpower(testsystem):
         r = mpc["branch"][i, 2]
         x = mpc["branch"][i, 3]
         b = mpc["branch"][i, 4]
-        u = 10000
+        u = mpc["branch"][i, 5]
         # buses[fbus].children.append(tbus)
         # buses[tbus].ancestor.append(fbus)
         # buses[tbus].inline.append(lindex)
@@ -232,7 +238,7 @@ def networkload_matpower(testsystem):
             elif lines[j].tbus == lines[k].fbus:
                 lines[j].children.append(k)
 
-    return buses, lines, generators, datamat
+    return buses, lines, generators, datamat, mpc
 
 
 def matpowercase(testsystem):
@@ -264,3 +270,11 @@ def matpowercase(testsystem):
         return case118()
     elif testsystem == "case300":
         return case300()
+    elif testsystem == "case9DN":
+        return case9DN()
+    elif testsystem == "caseAP15busDN":
+        return caseAP15busDN()
+    elif testsystem == "caseAP15busDNtest":
+        return caseAP15busDNtest()
+    elif testsystem == "caseAP15busDN3gen":
+        return caseAP15busDN3gen()

@@ -2,14 +2,31 @@
 from gurobipy import Model, GRB
 from math import pow, sqrt
 from pandas import DataFrame
-from py2P.Coefficients import anglerecovery
+from py2P.Coefficients import anglerecovery, makeYbus
+from py2P.NetworkLoad import networkload
 from py2P.makeModel import makeModel
 
 
-def calculatedlmp(
-        dispatch, buses, generators, lines, SMP, gensetP, gensetU, **optional):
+def runopf(testsystem):
 
-    print("dispatch:", dispatch)
+    buses, lines, generators, datamat, ppc = networkload(testsystem)
+
+    root = -1
+    for g in generators:
+        if generators[g].gtype == "Root":
+            root = generators[g].location
+
+    if root == -1:
+        print("No generator at root node")
+        generators[1].gtype = "Root"
+        root = 1
+
+    gensetP = []
+    gensetU = [root]
+    for g in generators:
+        if not g == root:
+            gensetP.append(g)
+
     # Consider reducing cyclomatic complexity by moving shadow price extraction
     B_gn = {}
     for i in buses:
@@ -18,36 +35,28 @@ def calculatedlmp(
         B_gn[generators[g].location].append(g)
 
     sbase = generators[1].mBase
-    m = Model()
-    if 'NodeInfo' in optional and 'LineInfo' in optional:
-        m = makeModel(buses, generators, lines, gensetP, gensetU,
-                      dispatch=dispatch, NodeInfo=optional['NodeInfo'],
-                      LineInfo=optional['LineInfo'])
-    elif 'NodeInfo' in optional:
-        m = makeModel(buses, generators, lines, gensetP, gensetU,
-                      dispatch=dispatch, NodeInfo=optional['NodeInfo'])
-    elif 'LineInfo' in optional:
-        m = makeModel(buses, generators, lines, gensetP, gensetU,
-                      dispatch=dispatch, LineInfo=optional['LineInfo'])
-    else:
-        m = makeModel(buses, generators, lines, gensetP,
-                      gensetU, dispatch=dispatch)
+    m = makeModel(buses, generators, lines, gensetP,
+                  gensetU)
 
     m.optimize()
 
     status = m.Status
 
     if not (status == GRB.OPTIMAL):
+        m.computeIIS()
+        constr = m.getConstrs()
+        Qconstr = m.getQConstrs()
+        for i in range(len(m.IISConstr)):
+            if m.IISConstr[i]:
+                print(constr[i])
+        for i in range(len(m.IISQConstr)):
+            if m.IISQConstr[i]:
+                print(Qconstr[i])
         nodestatus, linestatus = calculatebinding(
             m, len(buses), len(lines), len(generators))
-        NodeInfo = DataFrame([nodestatus], index=['status'])
-        LineInfo = DataFrame([linestatus], index=['status'])
-        return status, {}, {}, NodeInfo, LineInfo, {}, {}
+        return status, {}, {}, nodestatus, linestatus, {}, {}
 
     var = m.getVars()
-    # Getting constraint duals
-    constrs = m.getConstrs()
-    qconstrs = m.getQConstrs()
 
     # Extracting variable results into arrays
     obj_value = m.ObjVal
@@ -92,6 +101,12 @@ def calculatedlmp(
         if B_gn[b]:
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
+
+    theta = anglerecovery(lines, buses, fp, fq, v)
+
+    # Getting constraint duals
+    constrs = m.getConstrs()
+    qconstrs = m.getQConstrs()
 
     # Getting quadratic constraint duals
     qconstrCount = 0
@@ -271,8 +286,6 @@ def calculatedlmp(
                                 + eq42[lines[li].fbus] + eq43[lines[li].fbus]
                                 + eq44[lines[li].fbus])
 
-    theta = anglerecovery(lines, buses, fp, fq, v)
-
     print("::Network Info::\n")
     for b in buses:
         pgb[b] = round(pgb[b]*sbase, 4)
@@ -310,7 +323,7 @@ def calculatedlmp(
 
     GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
 
-    return status, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo
+    return status, dlmp, v, theta, NodeInfo, LineInfo, DLMPInfo, GenInfo
 
 
 def calculatebinding(model, buscount, linecount, gencount):

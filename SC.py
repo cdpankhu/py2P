@@ -1,17 +1,19 @@
 # SC.py
 from pandas import DataFrame
-from py2P.P2PTradeType import Agent
 from py2P.NetworkLoad import networkload
-from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
-from math import pow, sqrt
+from py2P.Coefficients import calculateptdf, makeYbus
+from py2P.makeModel import makeModel
+from math import pow, sqrt, floor
 from gurobipy import Model, GRB
+from time import strftime
+from os import makedirs
 
 
 def sc(testsystem):
-    buses, lines, generators, datamat = networkload(testsystem)
-    buses[1].Vmax = 1
-    buses[1].Vmin = 1
+    buses, lines, generators, datamat, ppc = networkload(testsystem)
+    # buses[1].Vmax = 1
+    # buses[1].Vmin = 1
     windset = {}
     windex = 1
 
@@ -64,136 +66,20 @@ def sc(testsystem):
         for k in buses:
             pbd[b, k] = 0
 
-    m = Model()
+    sbase = generators[1].mBase
 
-    v = m.addVars((b for b in buses), lb=0, name="v")
-    # Variable for current square
-    a = m.addVars((li for li in lines), lb=0, name="a")
-    fp = m.addVars((li for li in lines), name="fp", lb=float('-inf'))
-    fq = m.addVars((li for li in lines), name="fq", lb=float('-inf'))
-    pg = m.addVars((g for g in generators), name="pg", lb=float('-inf'))
-    qg = m.addVars((g for g in generators), name="qg", lb=float('-inf'))
-    oc = m.addVar(lb=0, name="oc")
-    ocgen = m.addVars((g for g in generators), lb=0, name="ocgen")
-    # P2P variables
-    p = m.addVars((b for b in buses), name='p', lb=float('-inf'))
-    pnm = m.addVars((b for b in buses), (b for b in buses), name='pnm',
-                    lb=float('-inf'))
+    model = makeModel(buses, generators, lines,
+                      gensetP, gensetU, SC=1, gam=gam)
 
-    m.update()
+    model.optimize()
 
-    # Set objective functions
-    obj = -oc
-    m.setObjective(obj, GRB.MAXIMIZE)
+    status = model.Status
 
-    # Create operating constraints
-    # Constraints for bidirectional trading
-    m.addConstrs((pnm[i, j] + pnm[j, i] == 0 for i in buses for j in buses),
-                 name='bidirection')
-
-    m.addConstrs((pnm[i, j] >= 0 for i in B_g for j in buses), name='signg')
-    m.addConstrs((pnm[i, j] <= 0 for i in B_d for j in buses), name='signd')
-    m.addConstrs((p[i] == sum(pnm[i, j] for j in buses) for i in buses),
-                 name='nodalbalance')
-
-    m.addConstrs((sum(pg[g] for g in B_gn[n]
-                      if not (g in gensetU)) == p[n] for n in B_g),
-                 name='genpower')
-    m.addConstrs(((-gam[n]) * buses[n].Pd == p[n] for n in B_d), name='demand')
-
-    m.addConstr((oc == sum(ocgen[g] for g in generators)),
-                name='operatingcost')
-
-    # Polynomial generation cost, single order
-    m.addConstrs(
-        (ocgen[g] == (generators[g].cost[1]*pg[g] + generators[g].cost[2])
-            for g in generators), name="gencost"
-    )
-
-    # Apparent power flow limits on the receiving node
-    m.addConstrs(
-        ((fp[li]*fp[li] + fq[li]*fq[li])
-            <= lines[li].u*lines[li].u for li in lines),
-        name="linecapfw"
-    )
-    # Apparent power flow limits on the sending node
-    m.addConstrs(
-        ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
-            + (fq[li] - a[li]*lines[li].x)*(fq[li] - a[li]*lines[li].x)
-            <= (lines[li].u)*(lines[li].u) for li in lines),
-        name="linecapbw"
-    )
-    # Constraint relating the line flows and voltages
-    m.addConstrs(
-        ((v[lines[li].fbus]
-            - 2*(lines[li].r*fp[li] + lines[li].x*fq[li])
-            + a[li]*(lines[li].r*lines[li].r + lines[li].x*lines[li].x))
-            == v[lines[li].tbus] for li in lines),
-        name="betweennodes"
-    )
-    # Second order conic constraint
-    m.addConstrs(
-        ((fp[li]*fp[li] + fq[li]*fq[li])
-            <= v[lines[li].fbus]*a[li] for li in lines),
-        name="socp"
-    )
-    # Voltage contraint for root node
-    for g in generators:
-        if generators[g].gtype == "Root":
-            m.addConstr(v[generators[g].location] == 1, name="rootvoltage")
-    # Active power balance constraint
-    m.addConstrs(
-        ((
-            sum(fp[li] for li in buses[b].outline)
-            - sum(fp[li] - lines[li].r*a[li] for li in buses[b].inline)
-            - sum(pg[g] for g in B_gn[b]) + buses[b].Pd + v[b]*buses[b].Gs
-            ) == 0 for b in buses),
-        name="pbalance"
-    )
-    # Reactive power balance constraint
-    m.addConstrs(
-        ((
-            sum(fq[li] for li in buses[b].outline)
-            - sum(fq[li] - lines[li].x*a[li] for li in buses[b].inline)
-            - sum(qg[g] for g in B_gn[b]) + buses[b].Qd - v[b]*buses[b].Bs
-            ) == 0 for b in buses),
-        name="qbalance"
-    )
-    m.addConstrs(
-        (v[b] <= buses[b].Vmax*buses[b].Vmax for b in buses),
-        name="vmax"
-    )
-    m.addConstrs(
-        (v[b] >= buses[b].Vmin*buses[b].Vmin for b in buses),
-        name="vmin"
-    )
-    m.addConstrs(
-        (pg[g] >= generators[g].Pmin for g in generators),
-        name="pgmin"
-    )
-    m.addConstrs(
-        (pg[g] <= generators[g].Pmax for g in generators),
-        name="pgmax"
-    )
-    m.addConstrs(
-        (qg[g] >= generators[g].Qmin for g in generators),
-        name="qgmin"
-    )
-    m.addConstrs(
-        (qg[g] <= generators[g].Qmax for g in generators),
-        name="qgmax"
-    )
-    m.Params.QCPDual = 1
-    m.update()
-
-    m.optimize()
-
-    status = m.Status
-
-    var = m.getVars()
+    var = model.getVars()
+    constrs = model.getConstrs()
 
     # Extracting variable results into arrays
-    obj_value = m.ObjVal
+    obj_value = model.ObjVal
     varCount = 0
     v = {}
     for b in buses:
@@ -205,19 +91,19 @@ def sc(testsystem):
         varCount += 1
     fp = {}
     for li in lines:
-        fp[li] = var[varCount].x
+        fp[li] = var[varCount].x*sbase
         varCount += 1
     fq = {}
     for li in lines:
-        fq[li] = var[varCount].x
+        fq[li] = var[varCount].x*sbase
         varCount += 1
     pg = {}
     for g in generators:
-        pg[g] = var[varCount].x
+        pg[g] = var[varCount].x*sbase
         varCount += 1
     qg = {}
     for g in generators:
-        qg[g] = var[varCount].x
+        qg[g] = var[varCount].x*sbase
         varCount += 1
     oc = var[varCount].x
     varCount += 1
@@ -227,13 +113,13 @@ def sc(testsystem):
         varCount += 1
     p = {}
     for b in buses:
-        p[b] = var[varCount].x
+        p[b] = var[varCount].x*sbase
         varCount += 1
     pnm = {}
     for i in buses:
         for j in buses:
-            if abs(var[varCount].x) > 1e-3:
-                pnm[i, j] = var[varCount].x
+            if abs(var[varCount].x) > 1e-6:
+                pnm[i, j] = var[varCount].x*sbase
             else:
                 pnm[i, j] = 0
             varCount += 1
@@ -248,12 +134,23 @@ def sc(testsystem):
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
 
+    constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
+        len(buses) + len(buses) + 1 + len(generators) + len(lines) + 1
+    dual_pbalance = {}
+    for b in buses:
+        dual_pbalance[b] = constrs[constrCount].Pi
+        constrCount += 1
+
     DLMPInfo = DataFrame()
     NodeInfo = DataFrame()
     LineInfo = DataFrame()
     GenInfo = DataFrame()
 
     dispatch = pg
+    print("dispatch1=:", dispatch)
+    # trade_scale is kW
+    # for i in dispatch:
+    #     dispatch[i] = floor(dispatch[i]*10**3)/(10**3)
     SMP = generators[root].cost[1]
     status1, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
         calculatedlmp(
@@ -321,9 +218,11 @@ def sc(testsystem):
     cashflow_mat = DataFrame([ep_p, ep_u, nuc, ur, cp],
                              index=['ep_p', 'ep_u', 'nuc', 'ur', 'cp'])
     cashflow_sum = DataFrame([sum_cp, sum_ep_p, sum_ep_u, sum_nuc,
-                              sum_dgr, sum_dgp, up],
+                              sum_gc_p, sum_gc_u, up],
                              index=['sum_cp', 'sum_ep_p', 'sum_ep_u', 'sum_nuc',
-                                    'sum_dgr', 'sum_dgp', 'up'])
+                                    'sum_ocp', 'sum_ocu', 'up'])
+    data_mat = DataFrame([pnm], index=["trades_dis"])
+    data_mat = data_mat.transpose()
 
     print("partlevel = ", partlevel)
     print("status = ", status)
@@ -335,20 +234,27 @@ def sc(testsystem):
     method = "sc"
 
     basefile = "C:\\Users\\Colton\\github\\py2P\\results\\"
-    busfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_busframe.csv"
-    nodefile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_nodeframe.csv"
-    linefile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_lineframe.csv"
-    dlmpfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_dlmpframe.csv"
-    genfile = basefile+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+"_genframe.csv"
-    cashflowmatfile = basefile+method+"_" + \
+    dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)
+
+    busfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_busframe.csv"
+    nodefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_nodeframe.csv"
+    linefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_lineframe.csv"
+    dlmpfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_dlmpframe.csv"
+    genfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_genframe.csv"
+    cashflowmatfile = dirname+"\\"+method+strftime("%Y-%m-%d-%H-%M-%S_")+"_" + \
         testsystem+"_"+str(100*partlevel)+"_cfmat.csv"
-    cashflowsumfile = basefile+method+"_" + \
+    cashflowsumfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
         testsystem+"_"+str(100*partlevel)+"_cfsum.csv"
+    datafile = dirname+"\\"+method+strftime("%Y-%m-%d-%H-%M-%S_")+"_" + \
+        testsystem+"_"+str(100*partlevel)+"_data.csv"
+
+    makedirs(dirname, exist_ok=True)
     bus_frame.to_csv(busfile)
     cashflow_mat.to_csv(cashflowmatfile)
     cashflow_sum.to_csv(cashflowsumfile)
@@ -356,5 +262,6 @@ def sc(testsystem):
     LineInfo.to_csv(linefile)
     DLMPInfo.to_csv(dlmpfile)
     GenInfo.to_csv(genfile)
+    data_mat.to_csv(datafile)
 
-    return dispatch, dlmp, pnm
+    return pnm, dlmp
