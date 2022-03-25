@@ -15,7 +15,8 @@ class Trade:
 
 
 class Agent:
-    def __init__(self, agentID, location, kind, pgMin, pgMax, costFn, Pd, Qd):
+    def __init__(self, agentID, location, kind, pgMin, pgMax, costFn, Pd, Qd,
+                 Tg, Td):
         self.agentID = agentID
         self.location = location
         self.kind = kind
@@ -24,3 +25,11 @@ class Agent:
         self.costFn = costFn
         self.Pd = Pd
         self.Qd = Qd
+        self.Tg = Tg
+        self.Td = Td
+        # Variable to limit utility buying/selling if causing congestion
+        self.utilityfixed = 0
+        self.pdutility = 0
+        self.pgutility = 0
+        self.gpenalty = 0
+        self.dpenalty = 0
