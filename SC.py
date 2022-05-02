@@ -11,7 +11,7 @@ from os import makedirs
 
 
 def sc(testsystem):
-    buses, lines, generators, datamat, ppc = networkload(testsystem)
+    buses, lines, generators, sBase, datamat, ppc = networkload(testsystem)
     # buses[1].Vmax = 1
     # buses[1].Vmin = 1
     windset = {}
@@ -66,14 +66,15 @@ def sc(testsystem):
         for k in buses:
             pbd[b, k] = 0
 
-    sbase = generators[1].mBase
-
-    model = makeModel(buses, generators, lines,
+    model = makeModel(buses, generators, lines, sBase,
                       gensetP, gensetU, SC=1, gam=gam)
 
     model.optimize()
 
     status = model.Status
+
+    if status != 2:
+        return model, [], []
 
     var = model.getVars()
     constrs = model.getConstrs()
@@ -91,19 +92,19 @@ def sc(testsystem):
         varCount += 1
     fp = {}
     for li in lines:
-        fp[li] = var[varCount].x*sbase
+        fp[li] = var[varCount].x*sBase
         varCount += 1
     fq = {}
     for li in lines:
-        fq[li] = var[varCount].x*sbase
+        fq[li] = var[varCount].x*sBase
         varCount += 1
     pg = {}
     for g in generators:
-        pg[g] = var[varCount].x*sbase
+        pg[g] = var[varCount].x*sBase
         varCount += 1
     qg = {}
     for g in generators:
-        qg[g] = var[varCount].x*sbase
+        qg[g] = var[varCount].x*sBase
         varCount += 1
     oc = var[varCount].x
     varCount += 1
@@ -113,16 +114,20 @@ def sc(testsystem):
         varCount += 1
     p = {}
     for b in buses:
-        p[b] = var[varCount].x*sbase
+        p[b] = var[varCount].x*sBase
         varCount += 1
     pnm = {}
     for i in buses:
         for j in buses:
             if abs(var[varCount].x) > 1e-6:
-                pnm[i, j] = var[varCount].x*sbase
+                pnm[i, j] = var[varCount].x*sBase
             else:
                 pnm[i, j] = 0
             varCount += 1
+    pnu = {}
+    for i in buses:
+        pnu[i] = var[varCount].x*sBase
+        varCount += 1
 
     pgb = {}
     qgb = {}
@@ -134,8 +139,11 @@ def sc(testsystem):
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
 
+    # constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
+    #     len(buses) + len(buses) + 1 + len(generators) + len(lines) + 1
+    # Remove len(generators) when considering quadratic system cost of gens
     constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
-        len(buses) + len(buses) + 1 + len(generators) + len(lines) + 1
+        len(buses) + len(buses) + 1 + len(lines) + 1
     dual_pbalance = {}
     for b in buses:
         dual_pbalance[b] = constrs[constrCount].Pi
@@ -147,14 +155,13 @@ def sc(testsystem):
     GenInfo = DataFrame()
 
     dispatch = pg
-    print("dispatch1=:", dispatch)
     # trade_scale is kW
     # for i in dispatch:
     #     dispatch[i] = floor(dispatch[i]*10**3)/(10**3)
     SMP = generators[root].cost[1]
     status1, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
         calculatedlmp(
-            dispatch, buses, generators, lines, SMP, gensetP, gensetU)
+            dispatch, buses, generators, lines, sBase, SMP, gensetP, gensetU)
 
     cn = {}
     for i in buses:
@@ -264,4 +271,4 @@ def sc(testsystem):
     GenInfo.to_csv(genfile)
     data_mat.to_csv(datafile)
 
-    return pnm, dlmp
+    return pnm, pnu, dlmp

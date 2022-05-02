@@ -9,6 +9,7 @@ from py2P.case9DN import case9DN
 from py2P.caseAP15busDN import caseAP15busDN
 from py2P.caseAP15busDNtest import caseAP15busDNtest
 from py2P.caseAP15busDN3gen import caseAP15busDN3gen
+from py2P.case33prosumer import case33prosumer
 
 
 def networkload(testsystem):
@@ -46,6 +47,8 @@ def networkload_nomatpower(testsystem):
         "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Generator.csv"
     filename_Line = \
         "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Line.csv"
+
+    sBase = 1
 
     busmat = read_csv(filename_Node)
     buses = {}
@@ -137,12 +140,14 @@ def networkload_nomatpower(testsystem):
     datamat["bus"] = busmat
     datamat["branch"] = branchmat
     datamat["gen"] = genmat
-    return buses, lines, generators, datamat, {}
+    return buses, lines, generators, sBase, datamat, {}
 
 
 def networkload_matpower(testsystem):
     mpc = matpowercase(testsystem)
     datamat = mpc
+
+    sBase = mpc["baseMVA"]
 
     buses = {}
     for i in range(len(mpc["bus"])):
@@ -209,6 +214,9 @@ def networkload_matpower(testsystem):
         x = mpc["branch"][i, 3]
         b = mpc["branch"][i, 4]
         u = mpc["branch"][i, 5]
+        # For limit of 0, set limit high since no limit considered
+        if u == 0:
+            u = 1000
         # buses[fbus].children.append(tbus)
         # buses[tbus].ancestor.append(fbus)
         # buses[tbus].inline.append(lindex)
@@ -238,7 +246,7 @@ def networkload_matpower(testsystem):
             elif lines[j].tbus == lines[k].fbus:
                 lines[j].children.append(k)
 
-    return buses, lines, generators, datamat, mpc
+    return buses, lines, generators, sBase, datamat, mpc
 
 
 def matpowercase(testsystem):
@@ -278,3 +286,5 @@ def matpowercase(testsystem):
         return caseAP15busDNtest()
     elif testsystem == "caseAP15busDN3gen":
         return caseAP15busDN3gen()
+    elif testsystem == "case33prosumer":
+        return case33prosumer()

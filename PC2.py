@@ -4,31 +4,29 @@ from py2P.P2PTradeType import Agent
 from py2P.NetworkLoad import networkload
 from py2P.TradeFunction import generatetrade, selecttrade
 from py2P.DLMP import calculatedlmp
-from py2P.Coefficients import calculateptdf
+from py2P.Coefficients import calculateptdf, calculatezth
 from py2P.makeJac import makeJacVSC
 from py2P.penaltyutil import vm_p_sum
-from py2P.SC import sc
-from math import pow, sqrt
+from math import pow, sqrt, floor
 from time import strftime
 from os import makedirs
 from numpy import sign
 
 
 def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
-    buses, lines, generators, datamat, ppc = networkload(testsystem)
-    # buses[1].Vmax = 1
-    # buses[1].Vmin = 1
+    buses, lines, generators, sBase, datamat, ppc = networkload(testsystem)
     windset = {}
     windex = 1
 
-    # get reference dlmp for nuc of tradings
-    pnm, dlmp_reference = sc(testsystem)
+    Zth = calculatezth(buses, lines)
 
     for g in generators:
         if generators[g].gtype == "Wind":
             windset[windex] = generators[g].gindex
             windex += 1
 
+    # Note: the root method below only works if gen 1 is slack gen at node 1
+    # Currently root was referring to gen index as opposed to root node location
     root = -1
     for g in generators:
         if generators[g].gtype == "Root":
@@ -37,7 +35,9 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     if root == -1:
         print("No generator at root node")
         generators[1].gtype = "Root"
-        root = 1
+        root = int(generators[1].location)
+
+    ptdf = calculateptdf(lines, buses, root)
 
     gensetP = []
     gensetU = [root]
@@ -62,97 +62,54 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     for g in generators:
         B_gn[generators[g].location].append(g)
 
-    # Share of demand from utility versus peers
-    partlevel = 1.0
-    gam = {}
-    for b in buses:
-        gam[b] = partlevel
-
-    # # Scale of each trade in MWh
-    # trade_scale = 1e-3  # trade in kWh
-    # # trade_scale = 1  # trade in MWh
-
     # Defining trading agents at non-root buses
     # Current definition defines a single agent of type 1 at each demand bus.
     # Current definition defines duplicate generator agents for each gen at bus
     # May need to refactor with addition of individual assets at single bus
     # multiple assets at single bus could act as aggregation as well???
+    # Current fixed tariff rates for buying and selling to grid
+    # in practice, utility could set based on program, time, etc.
+    # Tg is the feed in tariff rate, Td is the cost of utility supply
+    # Tg = 7.2
+    # Td = 8.1
+    Ez = 1
+    Tg = {}
+    Td = {}
+    for b in buses:
+        Tg[b] = generators[1].cost[1] - Ez*abs(Zth[b, 1])
+        Td[b] = generators[1].cost[1] + Ez*abs(Zth[b, 1])
+        # Tg[b] = 1
+        # Td[b] = 60
     agents = {}
     agentID = 1
     for b in buses:
         if not B_gn[b]:
             agents[agentID] = Agent(
-                b, b, 1, 0, 0, [0, 0, 0], gam[b]*buses[b].Pd,
-                gam[b]*buses[b].Qd)
+                b, b, 1, 0, 0, [0, 0, 0], buses[b].Pd, buses[b].Qd, Tg[b], Td[b])
             agentID += 1
         else:
             for g in B_gn[b]:
                 if generators[g].gtype != "Root":
                     agents[agentID] = Agent(
                         b, b, 1, generators[g].Pmin, generators[g].Pmax,
-                        generators[g].cost, gam[b]*buses[b].Pd,
-                        gam[b]*buses[b].Qd)
+                        generators[g].cost, buses[b].Pd, buses[b].Qd, Tg[b], Td[b])
                     agentID += 1
-
-    ptdf = calculateptdf(lines, buses, root)
 
     # Defining trades and result matrices
     trades = generatetrade(agents, trade_scale)
     trades_old = generatetrade(agents, trade_scale)
 
-    #Set trade nuc based on reference system usage charges
+    # Set trade nuc based on reference system usage charges
+    # Set starting trade prices as marginal cost of seller + nuc
+    # This effectively allows sellers to set minimum price at start of negotiation
+
     for w in trades:
-        trades[w].costNw = (
-             dlmp_reference[agents[trades[w].Ab].location]
-             - dlmp_reference[agents[trades[w].As].location])/2
-        if agents[trades[w].Ab].location == 2 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 1/2
-        elif agents[trades[w].Ab].location == 4 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 3/2
-        elif agents[trades[w].Ab].location == 5 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 4/2
-        elif agents[trades[w].Ab].location == 6 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 5/2
-        elif agents[trades[w].Ab].location == 7 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 6/2
-        elif agents[trades[w].Ab].location == 8 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 4/2
-        elif agents[trades[w].Ab].location == 9 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 5/2
-        elif agents[trades[w].Ab].location == 10 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 5/2
-        elif agents[trades[w].Ab].location == 11 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 6/2
-        elif agents[trades[w].Ab].location == 13 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 1/2
-        elif agents[trades[w].Ab].location == 14 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 2/2
-        elif agents[trades[w].Ab].location == 15 and agents[trades[w].As].location == 1:
-            trades[w].costNw = 3/2
-        elif agents[trades[w].Ab].location == 2 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 6/2
-        elif agents[trades[w].Ab].location == 4 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 4/2
-        elif agents[trades[w].Ab].location == 5 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 5/2
-        elif agents[trades[w].Ab].location == 6 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 6/2
-        elif agents[trades[w].Ab].location == 7 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 7/2
-        elif agents[trades[w].Ab].location == 8 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 3/2
-        elif agents[trades[w].Ab].location == 9 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 4/2
-        elif agents[trades[w].Ab].location == 10 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 2/2
-        elif agents[trades[w].Ab].location == 11 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 1/2
-        elif agents[trades[w].Ab].location == 13 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 8/2
-        elif agents[trades[w].Ab].location == 14 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 9/2
-        elif agents[trades[w].Ab].location == 15 and agents[trades[w].As].location == 12:
-            trades[w].costNw = 10/2
+        trades[w].costNw = Ez*abs(Zth[trades[w].As, trades[w].Ab])
+        # Set trade price to nearest floor price inrement of marginal cost
+        # trades[w].Pes = agents[trades[w].As].costFn[1] + trades[w].costNw
+        trades[w].Pes = floor(
+            (agents[trades[w].As].costFn[1] + trades[w].costNw)/deltaP)*deltaP
+        trades[w].Peb = trades[w].Pes
 
     trades_mat = {}
     trades_mat_buy = {}
@@ -192,6 +149,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         gencon_old[i] = 0
         dispatch_old[i] = 0
     status = 0
+    # Assume initial solution is feasible, if not, this will be set to 0
     status_old = 0
     dlmp = {}
     dlmp_stack = []
@@ -201,10 +159,14 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     NodeInfo = DataFrame()
     LineInfo = DataFrame()
     GenInfo = DataFrame()
-    LineState = Series()
-    NodeState = Series()
-    LineState_old = Series()
-    NodeState_old = Series()
+    LineState = Series(data=dict)
+    NodeState = Series(data=dict)
+    LineState_old = Series(data=dict)
+    NodeState_old = Series(data=dict)
+    for li in lines:
+        LineState_old[li] = 0
+    for b in buses:
+        NodeState_old[b] = 0
     dispatch_peerG = {}
     max_penalty_delta = 0
     max_nuc_delta = 0
@@ -216,7 +178,11 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         dispatch_peerG[i] = 0
     penalty_iter = 0
     outer_iter = 0
-    changestate = 0
+    changestate = 1
+    pg = {}
+    pd = {}
+    pg_old = {}
+    pd_old = {}
 
     # need to add timer code for performance assessment
     # Outer loop of iterative process
@@ -225,12 +191,6 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         outer_iter += 1
         accepted = {}
         rejected = {}
-        pg = {}
-        Revenue_Sell = {}
-        Cost_Buy = {}
-        Cost_Network = {}
-        Cost_Penalty = {}
-        Cost_DG = {}
         trade_prices = []
         trade_penalty_deltas = []
         if changestate == 0:
@@ -240,6 +200,10 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             status_old = status
             LineState_old = LineState
             NodeState_old = NodeState
+            for k in pg:
+                pg_old[k] = pg[k]
+            for k in pd:
+                pd_old[k] = pd[k]
         for w in trades:
             trade_prices.append(trades[w].Pes)
             trade_penalty_deltas.append(
@@ -263,20 +227,26 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         accepted = {}
         rejected = {}
         pg = {}
+        pd = {}
 
         gap = 1e-3
         for agentID in agents:
             print("agent: " + str(agentID) + " iter: " + str(outer_iter))
-            status, temp_accepted, temp_rejected, temp_pg, Revenue_Sell, \
-                Cost_Buy, Cost_Network, Cost_Penalty, Cost_DG, model = \
+            status, temp_accepted, temp_rejected, temp_pg, temp_pgutility, \
+                temp_pgpeer, temp_pd, temp_pdutility, temp_pdpeer = \
                 selecttrade(trades, agents, agentID, gap, trade_scale)
             accepted[agentID] = temp_accepted
             rejected[agentID] = temp_rejected
-            pg[agentID] = temp_pg
+            pg[agentID, "pg"] = temp_pg
+            pg[agentID, "pgutility"] = temp_pgutility
+            pg[agentID, "pgpeer"] = temp_pgpeer
+            pd[agentID, "pd"] = temp_pd
+            pd[agentID, "pdutility"] = temp_pdutility
+            pd[agentID, "pdpeer"] = temp_pdpeer
 
             if status != 2:
                 print("error with select trade")
-                return trades, agents, model, agentID, trade_scale
+                return trades, agents, 0, agentID, trade_scale, 0
 
         # Update trade prices according to presence in optimal sets
         # Note price only increases and so may overshoot optimal
@@ -297,14 +267,13 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             #       trades[w].Pes, trades[w].Peb, trades[w].costNw,
             #       trades[w].penalty, trades[w].Pes-trades[w].costNw,
             #       trades[w].Peb+trades[w].penalty+trades[w].costNw,
-            #       w in accepted[trades[w].As], w in accepted[trades[w].Ab],
-            #       trades[w].cleared)
+            #       w in accepted[trades[w].As], w in accepted[trades[w].Ab])
 
         trades_selected = []
         trades_rest = []
+        # Populate trades selected and order by nuc lowest to highest
         for w in trades:
             if (w in accepted[trades[w].Ab]) and (w in accepted[trades[w].As]):
-                # trades_selected.append(w)
                 if len(trades_selected) == 0:
                     trades_selected.append(w)
                 else:
@@ -321,13 +290,14 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             else:
                 trades_rest.append(w)
 
+        # Currently this uses agents, not sure if it makes sense for buses
         for i in agents:
             dispatch[i] = 0
             gencon[i] = 0
             generation[i] = 0
             consumption[i] = 0
 
-        # Determine nodal operating points according to incremental trades
+        # Determine dispatch contributions from P2P trades
         for w in trades_selected:
             dispatch[agents[trades[w].Ab].location] -= 1 * trade_scale
             dispatch[agents[trades[w].As].location] += 1 * trade_scale
@@ -336,11 +306,14 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             consumption[agents[trades[w].Ab].location] -= 1 * trade_scale
             generation[agents[trades[w].As].location] += 1 * trade_scale
 
+        # Add contributions from buy/sell to utility
         for a in agents:
-            dispatch[a] = round(dispatch[a], 3)
-            gencon[a] = round(gencon[a], 3)
-            consumption[a] = round(consumption[a], 3)
-            generation[a] = round(generation[a], 3)
+            dispatch[a] = round(dispatch[a] - pd[a, "pdutility"]
+                                + pg[a, "pgutility"], 3)
+            gencon[a] = round(gencon[a] - pd[a, "pdutility"]
+                              + pg[a, "pgutility"], 3)
+            consumption[a] = round(consumption[a] - pd[a, "pdutility"], 3)
+            generation[a] = round(generation[a] + pg[a, "pgutility"], 3)
 
         # Set generator dispatch values
         # This only works with one P generator per bus
@@ -353,7 +326,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         print(dispatch_peerG)
         status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
             calculatedlmp(
-                dispatch_peerG, buses, generators, lines, SMP, gensetP, gensetU
+                dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU
                 )
 
         # Update network charge
@@ -362,16 +335,11 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             # For all trades, update network charge
             for w in trades:
                 costNwold = trades[w].costNw
-                # trades[w].costNw = (
-                #     dlmp[agents[trades[w].Ab].location]
-                #     - dlmp[agents[trades[w].As].location])/2
                 costNwdelta = abs(costNwold - trades[w].costNw)
                 # track largest abs nuc change
                 if costNwdelta > max_nuc_delta:
                     max_nuc_delta = costNwdelta
         # Trade state infeasible, update penalty on violated trades
-        # Trades are successsively removed from the trade stack according to
-        # highest network charges first
         elif changestate == 0:
             penalty_iter += 1
             NodeState = NodeInfo.loc['status']
@@ -382,7 +350,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             # Run relaxed power flow to get feasible voltages and DLMPs
             print("Relaxed model")
             status2, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
-                calculatedlmp(dispatch_peerG, buses, generators, lines,
+                calculatedlmp(dispatch_peerG, buses, generators, lines, sBase,
                               SMP, gensetP, gensetU, NodeInfo=NodeState,
                               LineInfo=LineState)
             # Update penalty for trades according to proportional
@@ -422,21 +390,24 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                             elif wptdf < 0:
                                 trades[w].penalty += 0
                     # end of code to remove
-
+                    # Adjust congestion for P2P trades
                     for w in trades:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                            agents[trades[w].Ab].location], 4)
 
-                        if wptdf > 0:
-                            # trades[w].penalty += (LineState[li] * penpool
-                            #                       * wptdf / fwptdfsum)
-                            trades[w].penalty += LineState[li] * wptdf \
-                                                 * pen_scale
-                        elif wptdf < 0:
-                            # trades[w].penalty += (LineState[li] * penpool
-                            #                       * wptdf / bwptdfsum)
-                            trades[w].penalty += LineState[li] * wptdf \
-                                                 * pen_scale
+                        trades[w].penalty += LineState[li] * wptdf * pen_scale
+                        # trades[w].penalty += (LineState[li] * penpool
+                        #                       * wptdf / fwptdfsum)
+                    # Adjust congestion for P2utility trades
+                    for a in agents:
+                        wptdfg = round(ptdf[li, agents[a].location, root], 4)
+                        wptdfd = round(ptdf[li, root, agents[a].location], 4)
+
+                        agents[a].gpenalty += LineState[li] * \
+                            wptdfg * pen_scale
+                        agents[a].dpenalty += LineState[li] * \
+                            wptdfd * pen_scale
+
                     # for w in trades:
                     #     print(li, LineState[li], agents[trades[w].As].location,
                     #           agents[trades[w].Ab].location, trades[w].Pes,
@@ -487,32 +458,52 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             dlmp_stack.append(dlmp_temp)
             pnm_stack.append(pnm_temp)
 
+        # !! Congestion clearing process !!
         # Stable solution shifted from feasible to infeasible after penalty
         # Revert penalty back once and lock in trades for congested line
         if status == 2 and changestate == 0 and status_old != 2:
             print(LineState, LineState_old)
             for li in lines:
+                # Check if line congestion was alleviated
                 if LineState_old[li] != 0:
                     line_limit = lines[li].u * LineState_old[li]
                     line_loading = 0
                     line_violation = 0
-                    # First accept all trades in the non-violating direction
+                    # First accept all P2P trades in the non-violating direction
                     for w in trades_selected_old:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                            agents[trades[w].Ab].location], 4)
 
-                        if wptdf != 0 and sign(wptdf) != sign(LineState[li]):
+                        if wptdf != 0 and sign(wptdf) != sign(LineState_old[li]):
                             trades[w].penalty -= LineState_old[li] * wptdf \
                                                  * pen_scale
                             line_loading += wptdf*trade_scale
                             # Lock congestion on that line
                             trades[w].cleared = 1
-                    # Accept violating trades until the line flow is violated
+                    # Fix all non-violating direction P2U trades as is. This
+                    # includes trades of 0 with grid
+                    for a in agents:
+                        wptdfg = round(ptdf[li, agents[a].location, root])
+                        wptdfd = round(ptdf[li, root, agents[a].location])
+
+                        if wptdfg != 0 and sign(wptdfg) != sign(LineState_old[li]):
+                            agents[a].gpenalty -= LineState_old[li] * wptdfg \
+                                                 * pen_scale
+                            agents[a].utilityfixed = 1
+                            agents[a].pgutility = pg_old[a, "pgutility"]
+                            line_loading += wptdfg*agents[a].pgutility
+                        if wptdfd != 0 and sign(wptdfd) != sign(LineState_old[li]):
+                            agents[a].dpenalty -= LineState_old[li] * wptdfd \
+                                                 * pen_scale
+                            agents[a].utilityfixed = 1
+                            agents[a].pdutility = pd_old[a, "pdutility"]
+                            line_loading += wptdfd*agents[a].pdutility
+                    # Accept violating P2P trades while line capacity remains
                     for w in trades_selected_old:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                            agents[trades[w].Ab].location], 4)
 
-                        if wptdf != 0 and sign(wptdf) == sign(LineState[li]):
+                        if wptdf != 0 and sign(wptdf) == sign(LineState_old[li]):
                             line_loading += wptdf*trade_scale
                             if line_limit > 0 and line_loading >= line_limit:
                                 line_violation = 1
@@ -525,23 +516,64 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                                 trades[w].cleared = 1
                             else:
                                 trades[w].blocked = 1
+                    # Block all non-selected P2P trades impacting congestion
                     for w in trades_rest_old:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                            agents[trades[w].Ab].location], 4)
 
                         if wptdf != 0:
                             trades[w].blocked = 1
-            # for w in trades:
-            #     print(li, LineState_old[li], agents[trades[w].As].location,
-            #           agents[trades[w].Ab].location, trades[w].Pes,
-            #           trades[w].Peb, trades[w].costNw,
-            #           trades[w].penalty,
-            #           trades[w].costNw+trades[w].penalty,
-            #           trades[w].cleared)
-            # break
+                    # If any capacity remaining, allocate to P2U transactions
+                    # This also fixes trades if 0 in the violating direction
+                    # First, reduce penalties for violating tradees and order
+                    # agents according to lowest NUC with root
+                    nuc_agents = []
+                    for a in agents:
+                        wptdfg = round(ptdf[li, agents[a].location, root])
+                        wptdfd = round(ptdf[li, root, agents[a].location])
+                        if wptdfg != 0 or wptdfd != 0:
+                            agents[a].utilityfixed = 1
+                            agents[a].dpenalty -= LineState_old[li] * wptdfd \
+                                * pen_scale
+                            agents[a].gpenalty -= LineState_old[li] * wptdfg \
+                                * pen_scale
 
-        # if penalty_iter == 2 and changestate == 0:
-        #     break
+                        if len(nuc_agents) == 0:
+                            nuc_agents.append(a)
+                        else:
+                            inserted = 0
+                            for i in range(len(nuc_agents)):
+                                # insert prior to trade which Zth less than
+                                if Zth[a, root] < Zth[nuc_agents[i], root]:
+                                    nuc_agents.insert(i, a)
+                                    inserted = 1
+                                    break
+                            # costNw is greater than all others, put at end of list
+                            if inserted == 0:
+                                nuc_agents.append(a)
+                    # Next, iterate through agents in order of nuc for clearing
+                    for a in nuc_agents:
+                        wptdfg = round(ptdf[li, agents[a].location, root])
+                        wptdfd = round(ptdf[li, root, agents[a].location])
+
+                        if wptdfg != 0 and sign(wptdfg) == sign(LineState_old[li]):
+                            if pg_old[a, "pgutility"] >= abs(line_limit - line_loading) - trade_scale:
+                                agents[a].pgutility = abs(
+                                    line_limit - line_loading) - trade_scale
+                                line_loading += wptdfg * agents[a].pgutility
+                                break
+                            else:
+                                agents[a].pgutility = pg_old[a, "pgutility"]
+                                line_loading += wptdfg * agents[a].pgutility
+                        if wptdfd != 0 and sign(wptdfd) == sign(LineState_old[li]):
+                            if pd_old[a, "pdutility"] >= abs(line_limit - line_loading) - trade_scale:
+                                agents[a].pdutility = abs(
+                                    line_limit - line_loading) - trade_scale
+                                line_loading += wptdfd * agents[a].pdutility
+                                break
+                            else:
+                                agents[a].pdutility = pd_old[a, "pdutility"]
+                                line_loading += wptdfd * agents[a].pdutility
 
         # If gencon is unchanged, break while loop, feasible stable solution
         if gencon_old == gencon and status == 2 and changestate == 0:
@@ -721,12 +753,96 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     ep_p = {}
     nuc = {}
     pen = {}
+    seller_rev = {}
+    seller_rev_peer = {}
+    seller_rev_utility = {}
+    seller_rev_utility_energy = {}
+    buyer_cost = {}
+    buyer_cost_peer = {}
+    buyer_cost_utility = {}
+    buyer_cost_utility_penalty = {}
+    buyer_cost_utility_energy = {}
+    buyer_cost_utility_nuc = {}
+    buyer_cost_system = {}
+    buyer_cost_nuc = {}
+    buyer_cost_pen = {}
+    seller_cost_nuc = {}
+    seller_cost_gen = {}
+    seller_cost_utility_nuc = {}
+    seller_cost_utility_penalty = {}
+    seller_cost = {}
+    utility_cost = 0
+    utility_cost_wholesale = 0
+    utility_cost_peer = 0
+    utility_revenue = 0
+    utility_revenue_wholesale = 0
+    utility_revenue_peer = 0
+
     for b in buses:
         demand_P2P[b] = 0
         ep_u[b] = 0
         ep_p[b] = 0
         nuc[b] = 0
         pen[b] = 0
+        seller_rev[b] = 0
+        seller_rev_peer[b] = 0
+        seller_rev_utility[b] = 0
+        seller_rev_utility_energy[b] = 0
+        buyer_cost[b] = 0
+        buyer_cost_peer[b] = 0
+        buyer_cost_utility[b] = 0
+        buyer_cost_utility_energy[b] = 0
+        buyer_cost_utility_nuc[b] = 0
+        buyer_cost_utility_penalty[b] = 0
+        buyer_cost_system[b] = 0
+        buyer_cost_nuc[b] = 0
+        buyer_cost_pen[b] = 0
+        seller_cost_nuc[b] = 0
+        seller_cost_gen[b] = 0
+        seller_cost_utility_nuc[b] = 0
+        seller_cost_utility_penalty[b] = 0
+        seller_cost[b] = 0
+
+    # Cost of the system supplied energy due to trade scale rounding
+    for a in agents:
+        b = agents[a].location
+        buyer_cost_system[b] += (agents[a].Pd - pd[a, "pdpeer"]
+                                 - pd[a, "pdutility"]) * agents[a].Td
+        seller_rev_utility[b] += pg[a, "pgutility"] * (agents[a].Tg
+                                                       - agents[a].gpenalty)
+        buyer_cost_utility[b] += pd[a, "pdutility"] * (agents[a].Td
+                                                       + agents[a].dpenalty)
+        buyer_cost_utility_energy[b] += (pd[a, "pdutility"]
+                                         * generators[1].cost[1])
+        buyer_cost_utility_penalty[b] += pd[a,
+                                            "pdutility"] * agents[a].dpenalty
+        buyer_cost_utility_nuc[b] += (buyer_cost_utility[b]
+                                      - buyer_cost_utility_energy[b]
+                                      - buyer_cost_utility_penalty[b])
+        seller_rev_utility_energy[b] += pg[a,
+                                           "pgutility"] * generators[1].cost[1]
+        seller_cost_utility_penalty[b] += (pg[a, "pgutility"]
+                                           * agents[a].gpenalty)
+        seller_cost_utility_nuc[b] += (seller_rev_utility_energy[b]
+                                       - seller_rev_utility[b]
+                                       - seller_cost_utility_penalty[b])
+
+    for g in gensetP:
+        b = generators[g].location
+        seller_cost_gen[b] += (generators[g].cost[0] * (dispatch_peerG[g]
+                                                        * dispatch_peerG[g])
+                               + generators[g].cost[1] * dispatch_peerG[g])
+
+    # Add cost of wholesale to utility cost if buying from wholesale
+    if GenInfo[root]["pg"] > 0:
+        utility_cost_wholesale += generators[root].cost[1] * \
+            GenInfo[root]["pg"]
+    for b in buses:
+        utility_cost_peer += seller_rev_utility[b]
+
+    if GenInfo[root]["pg"] < 0:
+        utility_revenue_wholesale += generators[root].cost[1] * \
+            abs(GenInfo[root]["pg"])
 
     for m in B_d:
         demand_P2P[m] = sum(trades_dis[n, m] for n in B_g)
@@ -734,9 +850,24 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
 
     for w in trades_selected:
         ep_p[agents[trades[w].Ab].location] += trades[w].Pes*trade_scale
-        nuc[agents[trades[w].Ab].location] += 0.5*trades[w].costNw*trade_scale
-        nuc[agents[trades[w].As].location] += 0.5*trades[w].costNw*trade_scale
+        nuc[agents[trades[w].Ab].location] += trades[w].costNw*trade_scale
+        nuc[agents[trades[w].As].location] += trades[w].costNw*trade_scale
         pen[agents[trades[w].Ab].location] += trades[w].penalty*trade_scale
+        buyer_cost_peer[agents[trades[w].Ab].location] += trades[w].Pes*trade_scale
+        seller_rev_peer[agents[trades[w].As].location] += trades[w].Pes*trade_scale
+        buyer_cost_nuc[agents[trades[w].Ab].location] += trades[w].costNw*trade_scale
+        seller_cost_nuc[agents[trades[w].As].location] += trades[w].costNw*trade_scale
+        buyer_cost_pen[agents[trades[w].Ab].location] += trades[w].penalty*trade_scale
+
+    for b in buses:
+        seller_rev[b] += seller_rev_peer[b] + seller_rev_utility[b]
+        buyer_cost[b] += buyer_cost_peer[b] + buyer_cost_utility[b]\
+            + buyer_cost_nuc[b] + buyer_cost_pen[b] + buyer_cost_system[b]
+        seller_cost[b] += seller_cost_gen[b] + seller_cost_nuc[b]
+        utility_revenue_peer += buyer_cost_utility[b] + buyer_cost_system[b]
+
+    utility_revenue = utility_revenue_wholesale + utility_revenue_peer
+    utility_cost = utility_cost_wholesale + utility_cost_peer
 
     ur = {}
     cp = {}
@@ -746,7 +877,8 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
 
     gc = {}
     for g in generators:
-        gc[g] = generators[g].cost[1] * round(pg[g], 5)
+        gc[g] = generators[g].cost[1] \
+            * round(pg[generators[g].location, "pg"], 5)
 
     sum_gc_p = sum(gc[g] for g in gensetP)
     sum_gc_u = sum(gc[g] for g in gensetU)
@@ -758,6 +890,30 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     sum_ep_u = sum(ep_u[b] for b in buses)
     sum_nuc = sum(nuc[b] for b in buses)
     sum_pen = sum(pen[b] for b in buses)
+
+    sum_seller_rev = sum(seller_rev[b] for b in buses)
+    sum_seller_rev_peer = sum(seller_rev_peer[b] for b in buses)
+    sum_seller_rev_utility = sum(seller_rev_utility[b] for b in buses)
+    sum_seller_rev_utility_energy = sum(
+        seller_rev_utility_energy[b] for b in buses)
+    sum_buyer_cost = sum(buyer_cost[b] for b in buses)
+    sum_buyer_cost_peer = sum(buyer_cost_peer[b] for b in buses)
+    sum_buyer_cost_utility = sum(buyer_cost_utility[b] for b in buses)
+    sum_buyer_cost_utility_energy = sum(
+        buyer_cost_utility_energy[b] for b in buses)
+    sum_buyer_cost_utility_nuc = sum(buyer_cost_utility_nuc[b] for b in buses)
+    sum_buyer_cost_utility_penalty = sum(
+        buyer_cost_utility_penalty[b] for b in buses)
+    sum_buyer_cost_system = sum(buyer_cost_system[b] for b in buses)
+    sum_buyer_cost_nuc = sum(buyer_cost_nuc[b] for b in buses)
+    sum_buyer_cost_pen = sum(buyer_cost_pen[b] for b in buses)
+    sum_seller_cost_nuc = sum(seller_cost_nuc[b] for b in buses)
+    sum_seller_cost_gen = sum(seller_cost_gen[b] for b in buses)
+    sum_seller_cost_utility_nuc = sum(
+        seller_cost_utility_nuc[b] for b in buses)
+    sum_seller_cost_utility_penalty = sum(
+        seller_cost_utility_penalty[b] for b in buses)
+    sum_seller_cost = sum(seller_cost[b] for b in buses)
 
     trades_mat = {}
     trades_mat["tradeID"] = []
@@ -772,6 +928,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     trades_mat["passed"] = []
     trades_mat['buyer_pay'] = []
     trades_mat['seller_rev'] = []
+    trades_mat['accepted'] = []
     for w in trades:
         trades_mat["tradeID"].append(trades[w].tradeID)
         trades_mat["As"].append(trades[w].As)
@@ -782,6 +939,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         trades_mat["penalty"].append(trades[w].penalty)
         trades_mat["cleared"].append(trades[w].cleared)
         trades_mat["blocked"].append(trades[w].blocked)
+        trades_mat["accepted"].append(w in trades_selected)
         if w in trades_selected:
             trades_mat["passed"].append(1)
         else:
@@ -791,6 +949,63 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         trades_mat['seller_rev'].append(trades[w].Pes - trades[w].costNw)
 
     trades_frame = DataFrame(data=trades_mat)
+
+    revcost_mat = DataFrame([seller_rev, seller_rev_peer, seller_rev_utility,
+                             seller_rev_utility_energy,
+                             buyer_cost, buyer_cost_peer, buyer_cost_utility,
+                             buyer_cost_utility_energy, buyer_cost_utility_nuc,
+                             buyer_cost_utility_penalty,
+                             buyer_cost_system, buyer_cost_nuc,
+                             buyer_cost_pen, seller_cost, seller_cost_nuc,
+                             seller_cost_gen,
+                             seller_cost_utility_nuc,
+                             seller_cost_utility_penalty],
+                            index=["seller_rev", "seller_rev_peer",
+                                   "seller_rev_utility",
+                                   "seller_rev_utility_energy", "buyer_cost",
+                                   "buyer_cost_peer", "buyer_cost_utility",
+                                   "buyer_cost_utility_energy",
+                                   "buyer_cost_utility_nuc",
+                                   "buyer_cost_utility_penalty",
+                                   "buyer_cost_system", "buyer_cost_nuc",
+                                   "buyer_cost_pen", "seller_cost",
+                                   "seller_cost_nuc", "seller_cost_gen",
+                                   "seller_cost_utility_nuc",
+                                   "seller_cost_utility_penalty"])
+    revcost_sum = DataFrame([sum_seller_rev, sum_seller_rev_peer,
+                             sum_seller_rev_utility,
+                             sum_seller_rev_utility_energy, sum_buyer_cost,
+                             sum_buyer_cost_peer, sum_buyer_cost_utility,
+                             sum_buyer_cost_utility_energy,
+                             sum_buyer_cost_utility_nuc,
+                             sum_buyer_cost_utility_penalty,
+                             sum_buyer_cost_system, sum_buyer_cost_nuc,
+                             sum_buyer_cost_pen, sum_seller_cost,
+                             sum_seller_cost_nuc, sum_seller_cost_gen,
+                             sum_seller_cost_utility_nuc,
+                             sum_seller_cost_utility_penalty,
+                             utility_revenue, utility_revenue_wholesale,
+                             utility_revenue_peer, utility_cost,
+                             utility_cost_wholesale, utility_cost_peer],
+                            index=["sum_seller_rev", "sum_seller_rev_peer",
+                                   "sum_seller_rev_utility",
+                                   "sum_seller_rev_utility_energy",
+                                   "sum_buyer_cost",
+                                   "sum_buyer_cost_peer",
+                                   "sum_buyer_cost_utility",
+                                   "sum_buyer_cost_utility_energy",
+                                   "sum_buyer_cost_utility_nuc",
+                                   "sum_buyer_cost_utility_penalty",
+                                   "sum_buyer_cost_system",
+                                   "sum_buyer_cost_nuc",
+                                   "sum_buyer_cost_pen", "sum_seller_cost",
+                                   "sum_seller_cost_nuc", "sum_seller_cost_gen",
+                                   "sum_seller_cost_utility_nuc",
+                                   "sum_seller_cost_utility_penalty",
+                                   "utility_revenue",
+                                   "utility_revenue_wholesale",
+                                   "utility_revenue_peer", "utility_cost",
+                                   "utility_cost_wholesale", "utility_cost_peer"])
 
     cashflow_mat = DataFrame([ep_p, ep_u, nuc, pen, ur, cp],
                              index=['ep_p', 'ep_u', 'nuc', 'pen', 'ur', 'cp'])
@@ -804,7 +1019,6 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                          index=['trades_dis', 'nwcharge_dis', 'echarge_dis'])
     data_mat = data_mat.transpose()
 
-    print("partlevel = ", partlevel)
     print("status = ", status)
     print("max loading = ", max(loading[li] for li in lines)*100, "%")
     print("max voltage = ", round(max(voltage[b] for b in buses), 3))
@@ -818,30 +1032,36 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
 
     basefile = "C:\\Users\\Colton\\github\\py2P\\results\\"
     dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
-        testsystem + "_"+str(100*partlevel)+options
+        testsystem + "_"+options
     busfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+options+"_busframe.csv"
+        "_"+options+"_busframe.csv"
     nodefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+options+"_nodeframe.csv"
+        "_"+options+"_nodeframe.csv"
     linefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+options+"_lineframe.csv"
+        "_"+options+"_lineframe.csv"
     dlmpfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+options+"_dlmpframe.csv"
+        "_"+options+"_dlmpframe.csv"
     genfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+options+"_genframe.csv"
+        "_"+options+"_genframe.csv"
     cashflowmatfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
-        testsystem+"_"+str(100*partlevel)+options+"_cfmat.csv"
+        testsystem+"_"+options+"_cfmat.csv"
     cashflowsumfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
-        testsystem+"_"+str(100*partlevel)+options+"_cfsum.csv"
+        testsystem+"_"+options+"_cfsum.csv"
+    revcostmatfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem+"_"+options+"_revcostmat.csv"
+    revcostsumfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem+"_"+options+"_revcostsum.csv"
     datafile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
-        testsystem+"_"+str(100*partlevel)+options+"_data.csv"
+        testsystem+"_"+options+"_P2Pdata.csv"
     tradefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem + \
-        "_"+str(100*partlevel)+options+"_trades.csv"
+        "_"+options+"_P2Ptrades.csv"
 
     makedirs(dirname, exist_ok=True)
     bus_frame.to_csv(busfile)
     cashflow_mat.to_csv(cashflowmatfile)
     cashflow_sum.to_csv(cashflowsumfile)
+    revcost_mat.to_csv(revcostmatfile)
+    revcost_sum.to_csv(revcostsumfile)
     NodeInfo.to_csv(nodefile)
     LineInfo.to_csv(linefile)
     DLMPInfo.to_csv(dlmpfile)

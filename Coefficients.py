@@ -100,7 +100,7 @@ def makeYbus(buses, lines):
     return Ybus
 
 
-def makeZbus(buses, lines):
+def calculatezth(buses, lines):
     numlines = len(lines)
     numbus = len(buses)
     Ybus = zeros([numbus, numbus], complex128)
@@ -122,7 +122,15 @@ def makeZbus(buses, lines):
 
     Zbus = inv(Ybus)
 
-    return Zbus
+    Zth = {}
+    for i in buses:
+        for j in buses:
+            busi = int(i)
+            busj = int(j)
+            Zth[busi, busj] = (Zbus[busi-1, busi-1] + Zbus[busj-1, busj-1]
+                               - Zbus[busi-1, busj-1] - Zbus[busj-1, busi-1])
+
+    return Zth
 
 
 def calculatevsc(buses, lines, v, angles, root):

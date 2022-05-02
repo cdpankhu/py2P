@@ -9,7 +9,7 @@ from py2P.makeModel import makeModel
 
 def runopf(testsystem):
 
-    buses, lines, generators, datamat, ppc = networkload(testsystem)
+    buses, lines, generators, sBase, datamat, ppc = networkload(testsystem)
 
     root = -1
     for g in generators:
@@ -34,8 +34,7 @@ def runopf(testsystem):
     for g in generators:
         B_gn[generators[g].location].append(g)
 
-    sbase = generators[1].mBase
-    m = makeModel(buses, generators, lines, gensetP,
+    m = makeModel(buses, generators, lines, sBase, gensetP,
                   gensetU)
 
     m.optimize()
@@ -54,7 +53,7 @@ def runopf(testsystem):
                 print(Qconstr[i])
         nodestatus, linestatus = calculatebinding(
             m, len(buses), len(lines), len(generators))
-        return status, {}, {}, nodestatus, linestatus, {}, {}
+        return status, {}, {}, nodestatus, linestatus, {}, {}, {}
 
     var = m.getVars()
 
@@ -109,7 +108,8 @@ def runopf(testsystem):
     qconstrs = m.getQConstrs()
 
     # Getting quadratic constraint duals
-    qconstrCount = 0
+    # Add len(generators) to skip ocgen constraints which are quadratic
+    qconstrCount = 0 + len(generators)
     dual_linecapfw = {}
     for li in lines:
         dual_linecapfw[li] = qconstrs[qconstrCount].QCPi
@@ -125,7 +125,9 @@ def runopf(testsystem):
 
     # Getting linear constraint duals
     # Move count past oc, and ocgen
-    constrCount = 0 + 1 + len(generators)
+    # ocgen is quadratic considering quadratic price element
+    #constrCount = 0 + 1 + len(generators)
+    constrCount = 0 + 1
     dual_oc = constrs[0].Pi
     dual_betweennodes = {}
     for li in lines:
@@ -288,8 +290,8 @@ def runopf(testsystem):
 
     print("::Network Info::\n")
     for b in buses:
-        pgb[b] = round(pgb[b]*sbase, 4)
-        qgb[b] = round(qgb[b]*sbase, 4)
+        pgb[b] = round(pgb[b]*sBase, 4)
+        qgb[b] = round(qgb[b]*sBase, 4)
         v[b] = round(v[b], 4)
         theta[b] = round(theta[b], 5)
     NodeInfo = DataFrame([pgb, qgb, v, theta], index=[
@@ -297,29 +299,29 @@ def runopf(testsystem):
     print("::NodeInfo::\n", NodeInfo, "\n\n")
     flow = {}
     for li in lines:
-        flow[li] = round(sqrt(pow(fp[li]*sbase, 2) + pow(fq[li]*sbase, 2)), 3)
+        flow[li] = round(sqrt(pow(fp[li]*sBase, 2) + pow(fq[li]*sBase, 2)), 3)
         a[li] = round(a[li], 3)
-        fp[li] = round(fp[li]*sbase, 3)
-        fq[li] = round(fq[li]*sbase, 3)
+        fp[li] = round(fp[li]*sBase, 3)
+        fq[li] = round(fq[li]*sBase, 3)
     LineInfo = DataFrame([flow, a, fp, fq], index=['flow', 'i', 'fp', 'fq'])
     print("::LineInfo::\n", LineInfo, "\n\n")
 
     dlmpp = {}
     for b in buses:
-        dlmpp[b] = round(dlmp[b]/sbase, 2)
-        eq40[b] = round(eq40[b]/sbase, 2)
-        eq41[b] = round(eq41[b]/sbase, 2)
-        eq42[b] = round(eq42[b]/sbase, 2)
-        eq43[b] = round(eq43[b]/sbase, 2)
-        eq44[b] = round(eq44[b]/sbase, 2)
+        dlmpp[b] = round(dlmp[b]/sBase, 2)
+        eq40[b] = round(eq40[b]/sBase, 2)
+        eq41[b] = round(eq41[b]/sBase, 2)
+        eq42[b] = round(eq42[b]/sBase, 2)
+        eq43[b] = round(eq43[b]/sBase, 2)
+        eq44[b] = round(eq44[b]/sBase, 2)
     DLMPInfo = DataFrame([dlmpp, eq40, eq41, eq42, eq43, eq44],
                          index=["\u03BB_i", "eq40", "eq41", "eq42", "eq43",
                                 "eq44"])
     print("::DLMPInfo::\n", DLMPInfo, "\n\n")
 
     for g in generators:
-        pg[g] = pg[g]*sbase
-        qg[g] = qg[g]*sbase
+        pg[g] = pg[g]*sBase
+        qg[g] = qg[g]*sBase
 
     GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
 

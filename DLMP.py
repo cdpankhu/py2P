@@ -7,7 +7,7 @@ from py2P.makeModel import makeModel
 
 
 def calculatedlmp(
-        dispatch, buses, generators, lines, SMP, gensetP, gensetU, **optional):
+        dispatch, buses, generators, lines, sBase, SMP, gensetP, gensetU, **optional):
 
     print("dispatch:", dispatch)
     # Consider reducing cyclomatic complexity by moving shadow price extraction
@@ -17,27 +17,26 @@ def calculatedlmp(
     for g in generators:
         B_gn[generators[g].location].append(g)
 
-    sbase = generators[1].mBase
     m = Model()
     if 'NodeInfo' in optional and 'LineInfo' in optional:
-        m = makeModel(buses, generators, lines, gensetP, gensetU,
+        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU,
                       dispatch=dispatch, NodeInfo=optional['NodeInfo'],
                       LineInfo=optional['LineInfo'])
     elif 'NodeInfo' in optional:
-        m = makeModel(buses, generators, lines, gensetP, gensetU,
+        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU,
                       dispatch=dispatch, NodeInfo=optional['NodeInfo'])
     elif 'LineInfo' in optional:
-        m = makeModel(buses, generators, lines, gensetP, gensetU,
+        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU,
                       dispatch=dispatch, LineInfo=optional['LineInfo'])
     else:
-        m = makeModel(buses, generators, lines, gensetP,
+        m = makeModel(buses, generators, lines, sBase, gensetP,
                       gensetU, dispatch=dispatch)
 
     m.optimize()
 
     status = m.Status
 
-    if not (status == GRB.OPTIMAL):
+    if (status == GRB.INFEASIBLE):
         nodestatus, linestatus = calculatebinding(
             m, len(buses), len(lines), len(generators))
         NodeInfo = DataFrame([nodestatus], index=['status'])
@@ -94,7 +93,8 @@ def calculatedlmp(
             qgb[b] = sum(qg[g] for g in B_gn[b])
 
     # Getting quadratic constraint duals
-    qconstrCount = 0
+    # Skip quadratic ocgen constraints
+    qconstrCount = 0 + len(generators)
     dual_linecapfw = {}
     for li in lines:
         dual_linecapfw[li] = qconstrs[qconstrCount].QCPi
@@ -110,7 +110,8 @@ def calculatedlmp(
 
     # Getting linear constraint duals
     # Move count past oc, and ocgen
-    constrCount = 0 + 1 + len(generators)
+    # If ocgen is linear, need to skip len(generators)
+    constrCount = 0 + 1
     dual_oc = constrs[0].Pi
     dual_betweennodes = {}
     for li in lines:
@@ -275,8 +276,8 @@ def calculatedlmp(
 
     print("::Network Info::\n")
     for b in buses:
-        pgb[b] = round(pgb[b]*sbase, 4)
-        qgb[b] = round(qgb[b]*sbase, 4)
+        pgb[b] = round(pgb[b]*sBase, 4)
+        qgb[b] = round(qgb[b]*sBase, 4)
         v[b] = round(v[b], 4)
         theta[b] = round(theta[b], 5)
     NodeInfo = DataFrame([pgb, qgb, v, theta], index=[
@@ -284,33 +285,33 @@ def calculatedlmp(
     print("::NodeInfo::\n", NodeInfo, "\n\n")
     flow = {}
     for li in lines:
-        flow[li] = round(sqrt(pow(fp[li]*sbase, 2) + pow(fq[li]*sbase, 2)), 3)
+        flow[li] = round(sqrt(pow(fp[li]*sBase, 2) + pow(fq[li]*sBase, 2)), 3)
         a[li] = round(a[li], 3)
-        fp[li] = round(fp[li]*sbase, 3)
-        fq[li] = round(fq[li]*sbase, 3)
+        fp[li] = round(fp[li]*sBase, 3)
+        fq[li] = round(fq[li]*sBase, 3)
     LineInfo = DataFrame([flow, a, fp, fq], index=['flow', 'i', 'fp', 'fq'])
     print("::LineInfo::\n", LineInfo, "\n\n")
 
     dlmpp = {}
     for b in buses:
-        dlmpp[b] = round(dlmp[b]/sbase, 2)
-        eq40[b] = round(eq40[b]/sbase, 2)
-        eq41[b] = round(eq41[b]/sbase, 2)
-        eq42[b] = round(eq42[b]/sbase, 2)
-        eq43[b] = round(eq43[b]/sbase, 2)
-        eq44[b] = round(eq44[b]/sbase, 2)
+        dlmpp[b] = round(dlmp[b]/sBase, 2)
+        eq40[b] = round(eq40[b]/sBase, 2)
+        eq41[b] = round(eq41[b]/sBase, 2)
+        eq42[b] = round(eq42[b]/sBase, 2)
+        eq43[b] = round(eq43[b]/sBase, 2)
+        eq44[b] = round(eq44[b]/sBase, 2)
     DLMPInfo = DataFrame([dlmpp, eq40, eq41, eq42, eq43, eq44],
                          index=["\u03BB_i", "eq40", "eq41", "eq42", "eq43",
                                 "eq44"])
     print("::DLMPInfo::\n", DLMPInfo, "\n\n")
 
     for g in generators:
-        pg[g] = pg[g]*sbase
-        qg[g] = qg[g]*sbase
+        pg[g] = pg[g]*sBase
+        qg[g] = qg[g]*sBase
 
     GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
 
-    return status, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo
+    return status, dlmpp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo
 
 
 def calculatebinding(model, buscount, linecount, gencount):
@@ -320,9 +321,9 @@ def calculatebinding(model, buscount, linecount, gencount):
     iisqconstr = model.IISQConstr
 
     # Getting base index for flow and voltage constraints
-    linecapfwindex = 0
+    linecapfwindex = 0 + gencount
     linecapbwindex = linecapfwindex + linecount
-    vmaxindex = 0 + 1 + gencount + linecount + 1 + buscount + buscount
+    vmaxindex = 0 + 1 + linecount + 1 + buscount + buscount
     vminindex = vmaxindex + buscount
 
     nodestatus = {}

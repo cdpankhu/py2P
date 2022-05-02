@@ -14,7 +14,7 @@ from os import makedirs
 
 
 def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
-    buses, lines, generators, datamat, ppc = networkload(testsystem)
+    buses, lines, generators, sBase, datamat, ppc = networkload(testsystem)
     # buses[1].Vmax = 1
     # buses[1].Vmin = 1
     windset = {}
@@ -343,7 +343,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         print(dispatch_peerG)
         status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
             calculatedlmp(
-                dispatch_peerG, buses, generators, lines, SMP, gensetP, gensetU
+                dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU
                 )
 
         # Update network charge
@@ -370,7 +370,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             # Run relaxed power flow to get feasible voltages and DLMPs
             print("Relaxed model")
             status2, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
-                calculatedlmp(dispatch_peerG, buses, generators, lines,
+                calculatedlmp(dispatch_peerG, buses, generators, lines, sBase,
                               SMP, gensetP, gensetU, NodeInfo=NodeState,
                               LineInfo=LineState)
             # Update nuc with relaxed DLMPs
