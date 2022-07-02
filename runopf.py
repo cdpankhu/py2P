@@ -1,8 +1,8 @@
 # DLMP.py
-from gurobipy import Model, GRB
+from gurobipy import GRB
 from math import pow, sqrt
 from pandas import DataFrame
-from py2P.Coefficients import anglerecovery, makeYbus
+from py2P.Coefficients import anglerecovery
 from py2P.NetworkLoad import networkload
 from py2P.makeModel import makeModel
 
