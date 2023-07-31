@@ -153,7 +153,8 @@ def selecttrade(W, A, agentID, gap, trade_scale):
 
     status = m.Status
     if not (status == GRB.OPTIMAL):
-        return status, [], [], 0, 0, 0, 0, 0, 0, m
+        print("trade infeasible")
+        return status, m, [], 0, 0, 0, 0, 0, 0
     v = m.getVars()
     w = {}
     tradeID = 1

@@ -35,11 +35,11 @@ def networkload_nomatpower(testsystem):
     # filename_Generator = getcwd()+"\\data\\"+testsystem+"\\Generator.csv"
     # filename_Line = getcwd()+"\\data\\"+testsystem+"\\Line.csv"
     filename_Node = \
-        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Node.csv"
+        "N:\\Python\\py2P\\data\\"+testsystem+"\\Node.csv"
     filename_Generator = \
-        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Generator.csv"
+        "N:\\Python\\py2P\\data\\"+testsystem+"\\Generator.csv"
     filename_Line = \
-        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Line.csv"
+        "N:\\Python\\py2P\\data\\"+testsystem+"\\Line.csv"
 
     busmat = read_csv(filename_Node)
     buses = {}

@@ -6,6 +6,7 @@ class Trade:
         self.kind = kind
         self.Pes = Pes
         self.Peb = Peb
+        self.Pe = Pes
         self.As = As
         self.Ab = Ab
         self.cleared = 0

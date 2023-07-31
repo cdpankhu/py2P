@@ -1,9 +1,11 @@
 # DLMP.py
 from py2P.NetworkLoad import networkload
 from py2P.DLMP import calculatedlmp
+from datetime import datetime
+from pandas import DataFrame, Series
 
 
-def runpf(testsystem):
+def runpf(testsystem, set_conic, relaxed):
 
     buses, lines, generators, sBase, datamat, ppc = networkload(testsystem)
 
@@ -34,11 +36,23 @@ def runpf(testsystem):
     for g in generators:
         dispatch_peerG[g] = generators[g].Pg
 
-    SMP = generators[root].cost[1]
+    LineState = Series(data=dict)
+    if relaxed == 1:
+        for li in lines:
+            LineState[li] = 2
+    else:
+        for li in lines:
+            LineState[li] = 0
 
+    SMP = generators[root].cost[1]
+    start_time = datetime.now()
     status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
         calculatedlmp(
-            dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU
+            dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic=set_conic, LineInfo=LineState
             )
-
+    # status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
+    #     calculatedlmp(
+    #         dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic=0
+    #         )
+    print("total time: ", datetime.now() - start_time)
     return status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo

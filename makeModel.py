@@ -3,7 +3,7 @@
 from gurobipy import Model, GRB
 
 
-def makeModel(buses, generators, lines, sBase, gensetP, gensetU, **optional):
+def makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic, **optional):
 
     # Defining the set of generator buses and demand buses
     B_g = []
@@ -87,7 +87,7 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, **optional):
         M = 1000
         for li in lines:
             # Apparent power flow limits on the receiving node
-            if optional['LineInfo'][li] == -1:
+            if optional['LineInfo'][li] == -1 or optional['LineInfo'][li] == 2:
                 m.addConstr(((fp[li]*fp[li] + fq[li]*fq[li])
                              <= M*(lines[li].u*lines[li].u)/(sBase*sBase)),
                             name="linecapfw["+str(li)+"]")
@@ -97,7 +97,7 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, **optional):
                         <= (lines[li].u*lines[li].u)/(sBase*sBase)),
                     name="linecapfw["+str(li)+"]")
             # Apparent power flow limits on the sending node
-            if optional['LineInfo'][li] == 1:
+            if optional['LineInfo'][li] == 1 or optional['LineInfo'][li] == 2:
                 m.addConstr(
                     ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
                         + (fq[li] - a[li]*lines[li].x)
@@ -134,11 +134,18 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, **optional):
         name="betweennodes"
     )
     # Second order conic constraint
-    m.addConstrs(
-        ((fp[li]*fp[li] + fq[li]*fq[li])
-            <= v[lines[li].fbus]*a[li] for li in lines),
-        name="socp"
-    )
+    if conic == 1:
+        m.addConstrs(
+            ((fp[li]*fp[li] + fq[li]*fq[li])
+                <= v[lines[li].fbus]*a[li] for li in lines),
+            name="socp"
+        )
+    else:
+        m.addConstrs(
+            ((fp[li]*fp[li] + fq[li]*fq[li])
+                == v[lines[li].fbus]*a[li] for li in lines),
+            name="socp"
+        )
 
     # Voltage constraint for root node
     for g in generators:
@@ -167,13 +174,22 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, **optional):
         name="qbalance"
     )
     if "NodeInfo" in optional:
+        #m.addConstrs(
+        #    (v[b] <= float('inf') for b in buses),
+        #    name="vmax"
+        #)
+        #m.addConstrs(
+        #    (v[b] >= 0 for b in buses),
+        #    name="vmin"
+        #)
         for b in buses:
-            if optional['NodeInfo'][b] == 1:
+            if optional['NodeInfo'][b] == 1 or optional['NodeInfo'][b] == 2:
                 m.addConstr(v[b] <= float('inf'), name="vmax["+str(b)+"]")
             else:
                 m.addConstr(v[b] <= buses[b].Vmax*buses[b].Vmax,
                             name="vmax["+str(b)+"]")
-            if optional['NodeInfo'][b] == -1:
+        for b in buses:
+            if optional['NodeInfo'][b] == -1 or optional['NodeInfo'][b] == 2:
                 m.addConstr(v[b] >= 0, name="vmin["+str(b)+"]")
             else:
                 m.addConstr(v[b] >= buses[b].Vmin*buses[b].Vmin,
@@ -225,6 +241,12 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, **optional):
     m.Params.QCPDual = 1
     m.Params.BarQCPConvTol = 1e-7
     m.Params.BarHomogeneous = 1
+    m.Params.DualReductions = 0
+    m.Params.OptimalityTol = 1e-5
+    # m.Params.InfUnbdInfo = 1
+    # m.Params.Presolve = 0
+    if conic != 1:
+        m.Params.NonConvex = 2
     m.update()
 
     return m

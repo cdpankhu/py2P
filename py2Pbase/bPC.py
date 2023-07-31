@@ -138,7 +138,7 @@ def pc(testsystem):
     dispatch_peerG = {}
     for i in generators:
         dispatch_peerG[i] = 0
-    param_delta = 100
+    param_delta = 1
     outer_loop = 0
 
     # need to add timer code for performance assessment
@@ -616,7 +616,7 @@ def pc(testsystem):
     print("min dlmp = ", round(min(dlmp[b] for b in buses), 3))
     method = "basepc"
 
-    basefile = "C:\\Users\\Colton\\github\\py2P\\results\\"
+    basefile = "N:\\Python\\py2P\\results\\"
     dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
         testsystem
     busfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem \

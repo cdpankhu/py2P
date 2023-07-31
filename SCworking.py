@@ -1,15 +1,27 @@
-# DLMP.py
-from gurobipy import GRB
-from math import pow, sqrt
+# SC.py
 from pandas import DataFrame
-from py2P.Coefficients import anglerecovery
 from py2P.NetworkLoad import networkload
+from py2P.DLMP import calculatedlmp
+from py2P.Coefficients import anglerecovery
 from py2P.makeModel import makeModel
+from math import pow, sqrt, floor
+from gurobipy import Model, GRB
+from time import strftime
+from os import makedirs
 
 
-def runopf(testsystem):
-
+def sc(testsystem):
     buses, lines, generators, sBase, datamat, ppc = networkload(testsystem)
+    print(sBase)
+    # buses[1].Vmax = 1
+    # buses[1].Vmin = 1
+    windset = {}
+    windex = 1
+
+    for g in generators:
+        if generators[g].gtype == "Wind":
+            windset[windex] = generators[g].gindex
+            windex += 1
 
     root = -1
     for g in generators:
@@ -27,38 +39,58 @@ def runopf(testsystem):
         if not g == root:
             gensetP.append(g)
 
-    # Consider reducing cyclomatic complexity by moving shadow price extraction
+    # Defining the set of generator buses and demand buses
+    B_g = []
+    for g in generators:
+        if not (generators[g].location in B_g):
+            B_g.append(generators[g].location)
+            # For generation bus, set demand to 0
+            # This needs to be changed with updated model for storage, DR, etc.
+            buses[generators[g].location].Pd = 0
+    B_d = [i for i in buses if i not in B_g]
+
+    # Defining matrix of generators at each bus
     B_gn = {}
-    for i in buses:
-        B_gn[i] = []
+    for b in buses:
+        B_gn[b] = []
     for g in generators:
         B_gn[generators[g].location].append(g)
 
-    m = makeModel(buses, generators, lines, sBase, gensetP,
-                  gensetU, conic=1)
+    # Share of demand from utility versus peers
+    partlevel = 1.0
+    gam = {}
+    for b in buses:
+        gam[b] = partlevel
 
-    m.optimize()
+    pbd = {}
+    for b in buses:
+        for k in buses:
+            pbd[b, k] = 0
 
-    status = m.Status
+    model = makeModel(buses, generators, lines, sBase,
+                      gensetP, gensetU, SC=1, gam=gam)
 
-    if not (status == GRB.OPTIMAL):
-        m.computeIIS()
-        constr = m.getConstrs()
-        Qconstr = m.getQConstrs()
-        for i in range(len(m.IISConstr)):
-            if m.IISConstr[i]:
-                print(constr[i])
-        for i in range(len(m.IISQConstr)):
-            if m.IISQConstr[i]:
-                print(Qconstr[i])
+    model.optimize()
+
+    status = model.Status
+    
+    if (status == GRB.INFEASIBLE):
         nodestatus, linestatus = calculatebinding(
-            m, len(buses), len(lines), len(generators))
-        return status, {}, {}, nodestatus, linestatus, {}, {}, {}
+            model, len(buses), len(lines), len(generators))
+        NodeInfo = DataFrame([nodestatus], index=['status'])
+        LineInfo = DataFrame([linestatus], index=['status'])
+        print(NodeInfo.loc['status'], LineInfo.loc['status'])
+        return model, NodeInfo, LineInfo
 
-    var = m.getVars()
+    #if status != 2:
+    #    return model, [], []
+
+    var = model.getVars()
+    constrs = model.getConstrs()
+    qconstrs = model.getQConstrs()
 
     # Extracting variable results into arrays
-    obj_value = m.ObjVal
+    obj_value = model.ObjVal
     varCount = 0
     v = {}
     for b in buses:
@@ -90,6 +122,22 @@ def runopf(testsystem):
     for g in generators:
         ocgen[g] = var[varCount].x
         varCount += 1
+    p = {}
+    for b in buses:
+        p[b] = var[varCount].x
+        varCount += 1
+    pnm = {}
+    for i in buses:
+        for j in buses:
+            if abs(var[varCount].x) > 1e-6:
+                pnm[i, j] = var[varCount].x
+            else:
+                pnm[i, j] = 0
+            varCount += 1
+    pnu = {}
+    for i in buses:
+        pnu[i] = var[varCount].x
+        varCount += 1
 
     pgb = {}
     qgb = {}
@@ -100,15 +148,10 @@ def runopf(testsystem):
         if B_gn[b]:
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
-
-    theta = anglerecovery(lines, buses, fp, fq, v)
-
-    # Getting constraint duals
-    constrs = m.getConstrs()
-    qconstrs = m.getQConstrs()
-
+            
+            
     # Getting quadratic constraint duals
-    # Add len(generators) to skip ocgen constraints which are quadratic
+    # Skip quadratic ocgen constraints
     qconstrCount = 0 + len(generators)
     dual_linecapfw = {}
     for li in lines:
@@ -123,20 +166,11 @@ def runopf(testsystem):
         dual_socp[li] = qconstrs[qconstrCount].QCPi
         qconstrCount += 1
 
-    # Getting linear constraint duals
-    # Move count past oc, and ocgen
-    # ocgen is quadratic considering quadratic price element
-    #constrCount = 0 + 1 + len(generators)
-    constrCount = 0 + 1
-    dual_oc = constrs[0].Pi
-    dual_betweennodes = {}
-    for li in lines:
-        dual_betweennodes[li] = constrs[constrCount].Pi
-        constrCount += 1
-
-    # Move count past root generator voltage constraint
-    constrCount += 1
-
+    # constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
+    #     len(buses) + len(buses) + 1 + len(generators) + len(lines) + 1
+    # Remove len(generators) when considering quadratic system cost of gens
+    constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
+        len(buses) + len(buses) + 1 + len(lines) + 1
     dual_pbalance = {}
     for b in buses:
         dual_pbalance[b] = constrs[constrCount].Pi
@@ -145,32 +179,8 @@ def runopf(testsystem):
     for b in buses:
         dual_qbalance[b] = constrs[constrCount].Pi
         constrCount += 1
-    dual_vmax = {}
-    for b in buses:
-        dual_vmax[b] = constrs[constrCount].Pi
-        constrCount += 1
-    dual_vmin = {}
-    for b in buses:
-        dual_vmin[b] = constrs[constrCount].Pi
-        constrCount += 1
-    dual_pgmin = {}
-    for g in generators:
-        dual_pgmin[g] = constrs[constrCount].Pi
-        constrCount += 1
-    dual_pgmax = {}
-    for g in generators:
-        dual_pgmax[g] = constrs[constrCount].Pi
-        constrCount += 1
-    dual_qgmin = {}
-    for g in generators:
-        dual_qgmin[g] = constrs[constrCount].Pi
-        constrCount += 1
-    dual_qgmax = {}
-    for g in generators:
-        dual_qgmax[g] = constrs[constrCount].Pi
-        constrCount += 1
-
-        # Deriving DLMP coefficients from model results
+        
+    # Deriving DLMP coefficients from model results
     a1 = {}
     a2 = {}
     a3 = {}
@@ -287,7 +297,14 @@ def runopf(testsystem):
         dlmp[lines[li].fbus] = (eq40[lines[li].fbus] + eq41[lines[li].fbus]
                                 + eq42[lines[li].fbus] + eq43[lines[li].fbus]
                                 + eq44[lines[li].fbus])
+                                
+    theta = anglerecovery(lines, buses, fp, fq, v)
 
+    DLMPInfo = DataFrame()
+    NodeInfo = DataFrame()
+    LineInfo = DataFrame()
+    GenInfo = DataFrame()
+    
     print("::Network Info::\n")
     for b in buses:
         pgb[b] = round(pgb[b]*sBase, 4)
@@ -325,9 +342,125 @@ def runopf(testsystem):
 
     GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
 
-    return status, dlmp, v, theta, NodeInfo, LineInfo, DLMPInfo, GenInfo
+    dispatch = pg
+    # trade_scale is kW
+    # for i in dispatch:
+    #     dispatch[i] = floor(dispatch[i]*10**3)/(10**3)
+    #SMP = generators[root].cost[1]
+    #status1, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
+    #    calculatedlmp(
+    #        dispatch, buses, generators, lines, sBase, SMP, gensetP, gensetU)
 
+    cn = {}
+    for i in buses:
+        for j in buses:
+            cn[i, j] = (dlmp[j] - dlmp[i])/2
 
+    line_loading = {}
+    loading = {}
+    flow = {}
+    for li in lines:
+        line_loading[li] = 1 - round(
+            (lines[li].u - sqrt(
+                (pow(LineInfo[li]['fp'], 2)
+                 + pow(LineInfo[li]['fq'], 2))))/lines[li].u, 3)
+        loading[li] = LineInfo[li]['flow'] / lines[li].u
+        flow[li] = LineInfo[li]['flow']
+
+    v_marginrate = {}
+    voltage = {}
+    for b in buses:
+        v_marginrate[b] = round(0.1 - sqrt(NodeInfo[b]['v']), 3)/0.1
+        voltage[b] = sqrt(NodeInfo[b]['v'])
+
+    bus_frame = DataFrame([line_loading, v_marginrate, dlmp],
+                          index=['line_loading', 'v_marginrate', 'dlmp'])
+    # loading_frame = DataFrame([line_loading], index='line_loading')
+    # vmargin_frame = DataFrame([v_marginrate], index='v_marginrate')
+
+    ep_u = {}
+    ep_p = {}
+    nuc = {}
+    for b in buses:
+        ep_u[b] = 0
+        ep_p[b] = 0
+        nuc[b] = 0
+
+    for m in B_d:
+        ep_p[m] = sum(sum(generators[g].cost[1]*pnm[n, m] for g in B_gn[n]
+                          if not (g in gensetU)) for n in B_g if
+                      sum(i for i in B_gn[n] if not (i in gensetU)))
+        ep_u[m] = (1-gam[m])*buses[m].Pd*dlmp[m]
+        nuc[m] = sum(pnm[n, m]*(dlmp[m]-dlmp[n]) for n in B_g)
+
+    ur = {}
+    cp = {}
+    for b in buses:
+        ur[b] = ep_u[b] + nuc[b]
+        cp[b] = ep_u[b] + ep_p[b] + nuc[b]
+
+    gc = ocgen
+    sum_gc_p = sum(gc[g] for g in gensetP)
+    sum_gc_u = sum(gc[g] for g in gensetU)
+    sum_dgr = sum(gc[g] for g in gensetP)
+    sum_dgp = sum_dgr - sum_gc_p
+    up = sum(ur[b] for b in buses) - sum_gc_u
+    sum_cp = sum(cp[b] for b in buses)
+    sum_ep_p = sum(ep_p[b] for b in buses)
+    sum_ep_u = sum(ep_u[b] for b in buses)
+    sum_nuc = sum(nuc[b] for b in buses)
+
+    cashflow_mat = DataFrame([ep_p, ep_u, nuc, ur, cp],
+                             index=['ep_p', 'ep_u', 'nuc', 'ur', 'cp'])
+    cashflow_sum = DataFrame([sum_cp, sum_ep_p, sum_ep_u, sum_nuc,
+                              sum_gc_p, sum_gc_u, up],
+                             index=['sum_cp', 'sum_ep_p', 'sum_ep_u', 'sum_nuc',
+                                    'sum_ocp', 'sum_ocu', 'up'])
+    data_mat = DataFrame([pnm], index=["trades_dis"])
+    data_mat = data_mat.transpose()
+
+    print("partlevel = ", partlevel)
+    print("status = ", status)
+    print("max loading = ", max(loading[li] for li in lines)*100, "%")
+    print("max voltage = ", round(max(voltage[b] for b in buses), 3))
+    print("min voltage = ", round(min(voltage[b] for b in buses), 3))
+    print("max dlmp = ", round(max(dlmp[b] for b in buses), 3))
+    print("min dlmp = ", round(min(dlmp[b] for b in buses), 3))
+    method = "sc"
+
+    basefile = "D:\\Profiles\\cdpankhu\\Python\\py2P\\results\\"
+    dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)
+
+    busfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_busframe.csv"
+    nodefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_nodeframe.csv"
+    linefile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_lineframe.csv"
+    dlmpfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_dlmpframe.csv"
+    genfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem + "_"+str(100*partlevel)+"_genframe.csv"
+    cashflowmatfile = dirname+"\\"+method+strftime("%Y-%m-%d-%H-%M-%S_")+"_" + \
+        testsystem+"_"+str(100*partlevel)+"_cfmat.csv"
+    cashflowsumfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
+        testsystem+"_"+str(100*partlevel)+"_cfsum.csv"
+    datafile = dirname+"\\"+method+strftime("%Y-%m-%d-%H-%M-%S_")+"_" + \
+        testsystem+"_"+str(100*partlevel)+"_data.csv"
+
+    makedirs(dirname, exist_ok=True)
+    bus_frame.to_csv(busfile)
+    cashflow_mat.to_csv(cashflowmatfile)
+    cashflow_sum.to_csv(cashflowsumfile)
+    NodeInfo.to_csv(nodefile)
+    LineInfo.to_csv(linefile)
+    DLMPInfo.to_csv(dlmpfile)
+    GenInfo.to_csv(genfile)
+    data_mat.to_csv(datafile)
+
+    return pnm, pnu, dlmp
+    
 def calculatebinding(model, buscount, linecount, gencount):
 
     model.computeIIS()
@@ -335,9 +468,9 @@ def calculatebinding(model, buscount, linecount, gencount):
     iisqconstr = model.IISQConstr
 
     # Getting base index for flow and voltage constraints
-    linecapfwindex = 0
+    linecapfwindex = 0 + gencount
     linecapbwindex = linecapfwindex + linecount
-    vmaxindex = 0 + 1 + gencount + linecount + 1 + buscount + buscount
+    vmaxindex = 0 + 1 + linecount + 1 + buscount + buscount
     vminindex = vmaxindex + buscount
 
     nodestatus = {}

@@ -7,7 +7,7 @@ from py2P.makeModel import makeModel
 
 
 def calculatedlmp(
-        dispatch, buses, generators, lines, sBase, SMP, gensetP, gensetU, **optional):
+        dispatch, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic, **optional):
 
     print("dispatch:", dispatch)
     # Consider reducing cyclomatic complexity by moving shadow price extraction
@@ -19,29 +19,42 @@ def calculatedlmp(
 
     m = Model()
     if 'NodeInfo' in optional and 'LineInfo' in optional:
-        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU,
+        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic,
                       dispatch=dispatch, NodeInfo=optional['NodeInfo'],
                       LineInfo=optional['LineInfo'])
     elif 'NodeInfo' in optional:
-        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU,
+        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic,
                       dispatch=dispatch, NodeInfo=optional['NodeInfo'])
     elif 'LineInfo' in optional:
-        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU,
+        m = makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic,
                       dispatch=dispatch, LineInfo=optional['LineInfo'])
     else:
         m = makeModel(buses, generators, lines, sBase, gensetP,
-                      gensetU, dispatch=dispatch)
+                      gensetU, conic, dispatch=dispatch)
 
     m.optimize()
 
     status = m.Status
+    print("status: ", status)
 
+    # IIS is currently disabled
+    # if (status == GRB.INFEASIBLE):
+    #     nodestatus, linestatus = calculatebinding(
+    #         m, len(buses), len(lines), len(generators))
+    #     NodeInfo = DataFrame([nodestatus], index=['status'])
+    #     LineInfo = DataFrame([linestatus], index=['status'])
+    #     print(NodeInfo.loc['status'], LineInfo.loc['status'])
+    #     return status, {}, {}, NodeInfo, LineInfo, {}, {}
     if (status == GRB.INFEASIBLE):
-        nodestatus, linestatus = calculatebinding(
-            m, len(buses), len(lines), len(generators))
+        nodestatus = {} 
+        linestatus = {}
+        for b in buses:
+            nodestatus[b] = 0
+        for li in lines:
+            linestatus[li] = 0
         NodeInfo = DataFrame([nodestatus], index=['status'])
         LineInfo = DataFrame([linestatus], index=['status'])
-        return status, {}, {}, NodeInfo, LineInfo, {}, {}
+        return status, m, {}, NodeInfo, LineInfo, {}, {}
 
     var = m.getVars()
     # Getting constraint duals
@@ -91,6 +104,49 @@ def calculatedlmp(
         if B_gn[b]:
             pgb[b] = sum(pg[g] for g in B_gn[b])
             qgb[b] = sum(qg[g] for g in B_gn[b])
+
+    theta = anglerecovery(lines, buses, fp, fq, v)
+
+    state_linecapfw = {}
+    state_linecapbw = {}
+    socp_lhs = {}
+    socp_rhs = {}
+    for li in lines:
+        state_linecapfw[li] = int((fp[li]*fp[li] + fq[li]*fq[li]) > (lines[li].u*lines[li].u)/(sBase*sBase))
+        state_linecapbw[li] = int((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r) + (fq[li] - a[li]*lines[li].x) * (fq[li] - a[li]*lines[li].x) > (lines[li].u*lines[li].u)/(sBase*sBase))
+        socp_lhs[li] = (fp[li]*fp[li] + fq[li]*fq[li])
+        socp_rhs[li] = v[lines[li].fbus]*a[li]
+
+    print("::Network Info::\n")
+    for b in buses:
+        pgb[b] = round(pgb[b]*sBase, 4)
+        qgb[b] = round(qgb[b]*sBase, 4)
+        v[b] = round(v[b], 4)
+        theta[b] = round(theta[b], 5)
+    NodeInfo = DataFrame([pgb, qgb, v, theta], index=[
+                         'pg', 'qg', 'v', 'theta'])
+    print("::NodeInfo::\n", NodeInfo, "\n\n")
+    flow = {}
+    a_real = {}
+    fp_real = {}
+    fq_real = {}
+    for li in lines:
+        flow[li] = round(sqrt(pow(fp[li]*sBase, 2) + pow(fq[li]*sBase, 2)), 3)
+        a_real[li] = round(a[li], 3)
+        fp_real[li] = round(fp[li]*sBase, 3)
+        fq_real[li] = round(fq[li]*sBase, 3)
+    LineInfo = DataFrame([flow, a_real, fp_real, fq_real, state_linecapfw, state_linecapbw, socp_lhs, socp_rhs], index=['flow', 'i', 'fp', 'fq', 'linecapfw', 'linecapbw', 'socp_lhs', 'socp_rhs'])
+    print("::LineInfo::\n", LineInfo, "\n\n")
+
+    for g in generators:
+        pg[g] = pg[g]*sBase
+        qg[g] = qg[g]*sBase
+
+    GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
+
+    if ('LineInfo' in optional) or ('NodeInfo' in optional) or conic != 1:
+        return status, {}, pg, NodeInfo, LineInfo, {}, GenInfo
+    
 
     # Getting quadratic constraint duals
     # Skip quadratic ocgen constraints
@@ -161,6 +217,7 @@ def calculatedlmp(
     a4 = {}
     a5 = {}
     for li in lines:
+        #print("lines: ", li, lines[li].x, lines[li].r)
         # ((fp[l]^2+fq[l]^2)*lines[l].x+a[l]*fq[l]*(lines[l].r^2-lines[l].x^2)
         # -2*a[l]*fp[l]*lines[l].r*lines[l].x)
         # /((fp[l]^2+fq[l]^2)*lines[l].x-a[l]*fq[l]*(lines[l].r^2+lines[l].x^2))
@@ -272,26 +329,6 @@ def calculatedlmp(
                                 + eq42[lines[li].fbus] + eq43[lines[li].fbus]
                                 + eq44[lines[li].fbus])
 
-    theta = anglerecovery(lines, buses, fp, fq, v)
-
-    print("::Network Info::\n")
-    for b in buses:
-        pgb[b] = round(pgb[b]*sBase, 4)
-        qgb[b] = round(qgb[b]*sBase, 4)
-        v[b] = round(v[b], 4)
-        theta[b] = round(theta[b], 5)
-    NodeInfo = DataFrame([pgb, qgb, v, theta], index=[
-                         'pg', 'qg', 'v', 'theta'])
-    print("::NodeInfo::\n", NodeInfo, "\n\n")
-    flow = {}
-    for li in lines:
-        flow[li] = round(sqrt(pow(fp[li]*sBase, 2) + pow(fq[li]*sBase, 2)), 3)
-        a[li] = round(a[li], 3)
-        fp[li] = round(fp[li]*sBase, 3)
-        fq[li] = round(fq[li]*sBase, 3)
-    LineInfo = DataFrame([flow, a, fp, fq], index=['flow', 'i', 'fp', 'fq'])
-    print("::LineInfo::\n", LineInfo, "\n\n")
-
     dlmpp = {}
     for b in buses:
         dlmpp[b] = round(dlmp[b]/sBase, 2)
@@ -305,16 +342,63 @@ def calculatedlmp(
                                 "eq44"])
     print("::DLMPInfo::\n", DLMPInfo, "\n\n")
 
-    for g in generators:
-        pg[g] = pg[g]*sBase
-        qg[g] = qg[g]*sBase
-
-    GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
-
     return status, dlmpp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo
 
 
 def calculatebinding(model, buscount, linecount, gencount):
+    # constrs = model.getConstrs()
+    # qconstrs = model.getQConstrs()
+    # constrCount = 0
+    # constrCount = 0 + 1
+    # constrs[0].IISConstrForce = 0
+    # for li in range(linecount):
+    #     constrs[constrCount].IISConstrForce = 1
+    #     constrCount += 1
+
+    # # Move count past root generator voltage constraint
+    # constrs[constrCount].IISConstrForce = 1
+    # constrCount += 1
+
+    # for b in range(buscount):
+    #     constrs[constrCount].IISConstrForce = 1
+    #     constrCount += 1
+    # for b in range(buscount):
+    #     constrs[constrCount].IISConstrForce = 1
+    #     constrCount += 1
+    # #vmax
+    # for b in range(buscount):
+    #     constrCount += 1
+    # #vmin
+    # for b in range(buscount):
+    #     constrCount += 1
+    # for g in range(gencount):
+    #     constrs[constrCount].IISConstrForce = 1
+    #     constrCount += 1
+    # for g in range(gencount):
+    #     constrs[constrCount].IISConstrForce = 1
+    #     constrCount += 1
+    # for g in range(gencount):
+    #     constrs[constrCount].IISConstrForce = 1
+    #     constrCount += 1
+    # for g in range(gencount):
+    #     constrs[constrCount].IISConstrForce = 1
+    #     constrCount += 1
+    
+    # qconstrCount = 0
+    # for g in range(gencount):
+    #     qconstrs[qconstrCount].IISQConstrForce = 1
+    #     qconstrCount += 1
+    # #linecapfw
+    # for li in range(linecount):
+    #     qconstrCount += 1
+    
+    # #linecapbw
+    # for li in range(linecount):
+    #     qconstrCount += 1
+    
+    # for li in range(linecount):
+    #     qconstrs[qconstrCount].IISQConstrForce = 1
+    #     qconstrCount += 1
 
     model.computeIIS()
     iisconstr = model.IISConstr

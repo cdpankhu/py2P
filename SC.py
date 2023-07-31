@@ -67,13 +67,13 @@ def sc(testsystem):
             pbd[b, k] = 0
 
     model = makeModel(buses, generators, lines, sBase,
-                      gensetP, gensetU, SC=1, gam=gam)
+                      gensetP, gensetU, conic=1, SC=1, gam=gam)
 
     model.optimize()
 
     status = model.Status
 
-    if status != 2:
+    if status == GRB.INFEASIBLE:
         return model, [], []
 
     var = model.getVars()
@@ -142,12 +142,12 @@ def sc(testsystem):
     # constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
     #     len(buses) + len(buses) + 1 + len(generators) + len(lines) + 1
     # Remove len(generators) when considering quadratic system cost of gens
-    constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
-        len(buses) + len(buses) + 1 + len(lines) + 1
-    dual_pbalance = {}
-    for b in buses:
-        dual_pbalance[b] = constrs[constrCount].Pi
-        constrCount += 1
+    # constrCount = 0 + len(buses)*len(buses) + len(buses)*len(buses) + \
+    #     len(buses) + len(buses) + 1 + len(lines) + 1
+    # dual_pbalance = {}
+    # for b in buses:
+    #     dual_pbalance[b] = constrs[constrCount].Pi
+    #     constrCount += 1
 
     DLMPInfo = DataFrame()
     NodeInfo = DataFrame()
@@ -161,7 +161,7 @@ def sc(testsystem):
     SMP = generators[root].cost[1]
     status1, dlmp, pg, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
         calculatedlmp(
-            dispatch, buses, generators, lines, sBase, SMP, gensetP, gensetU)
+            dispatch, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic=1)
 
     cn = {}
     for i in buses:
@@ -240,7 +240,7 @@ def sc(testsystem):
     print("min dlmp = ", round(min(dlmp[b] for b in buses), 3))
     method = "sc"
 
-    basefile = "C:\\Users\\Colton\\github\\py2P\\results\\"
+    basefile = "N:\\Python\\py2P\\results\\"
     dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
         testsystem + "_"+str(100*partlevel)
 

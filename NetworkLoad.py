@@ -10,6 +10,7 @@ from py2P.caseAP15busDN import caseAP15busDN
 from py2P.caseAP15busDNtest import caseAP15busDNtest
 from py2P.caseAP15busDN3gen import caseAP15busDN3gen
 from py2P.case33prosumer import case33prosumer
+from py2P.case141caracas import case141caracas
 
 
 def networkload(testsystem):
@@ -42,11 +43,11 @@ def networkload_nomatpower(testsystem):
     # filename_Generator = getcwd()+"\\data\\"+testsystem+"\\Generator.csv"
     # filename_Line = getcwd()+"\\data\\"+testsystem+"\\Line.csv"
     filename_Node = \
-        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Node.csv"
+        "N:\\Python\\py2P\\data\\"+testsystem+"\\Node.csv"
     filename_Generator = \
-        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Generator.csv"
+        "N:\\Python\\py2P\\data\\"+testsystem+"\\Generator.csv"
     filename_Line = \
-        "C:\\Users\\Colton\\github\\py2P\\data\\"+testsystem+"\\Line.csv"
+        "N:\\Python\\py2P\\data\\"+testsystem+"\\Line.csv"
 
     sBase = 1
 
@@ -288,3 +289,5 @@ def matpowercase(testsystem):
         return caseAP15busDN3gen()
     elif testsystem == "case33prosumer":
         return case33prosumer()
+    elif testsystem == "case141caracas":
+        return case141caracas()

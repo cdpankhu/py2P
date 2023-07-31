@@ -336,7 +336,7 @@ def sc(testsystem):
     print("min dlmp = ", round(min(dlmp[b] for b in buses), 3))
     method = "basesc"
 
-    basefile = "C:\\Users\\Colton\\github\\py2P\\results\\"
+    basefile = "N:\\Python\\py2P\\results\\"
     dirname = basefile+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_" + \
         testsystem
     busfile = dirname+"\\"+strftime("%Y-%m-%d-%H-%M-%S_")+method+"_"+testsystem \
