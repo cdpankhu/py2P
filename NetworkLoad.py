@@ -10,6 +10,7 @@ from py2P.caseAP15busDN import caseAP15busDN
 from py2P.caseAP15busDNtest import caseAP15busDNtest
 from py2P.caseAP15busDN3gen import caseAP15busDN3gen
 from py2P.case33prosumer import case33prosumer
+from py2P.case33constrained import case33constrained
 from py2P.case141caracas import case141caracas
 
 
@@ -289,5 +290,7 @@ def matpowercase(testsystem):
         return caseAP15busDN3gen()
     elif testsystem == "case33prosumer":
         return case33prosumer()
+    elif testsystem == "case33constrained":
+        return case33constrained()
     elif testsystem == "case141caracas":
         return case141caracas()

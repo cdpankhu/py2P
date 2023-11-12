@@ -46,6 +46,8 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic, **option
         pnu = m.addVars((b for b in buses), name='pnm',
                         lb=float('-inf'))
 
+    if "LineInfo" in optional:
+        fslack = m.addVars((li for li in lines), name='fslack', lb = 0)
     m.update()
 
     # Set objective functions
@@ -77,7 +79,11 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic, **option
                       for n in B_d), name='demand')
 
     # Define operating cost
-    m.addConstr(oc == sum(ocgen[g] for g in generators), name="oc")
+    pfactor = 10000
+    if "LineInfo" in optional:
+        m.addConstr(oc == sum(ocgen[g] for g in generators)+ sum(fslack[li]*fslack[li] for li in lines)*pfactor, name="oc")
+    else:
+        m.addConstr(oc == sum(ocgen[g] for g in generators), name="oc")
     # Define linear generation cost
     m.addConstrs(
         (ocgen[g] >= ((pg[g]*sBase)*(pg[g]*sBase)*generators[g].cost[0] + generators[g].cost[1]*pg[g]*sBase + generators[g].cost[2])
@@ -88,8 +94,12 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic, **option
         for li in lines:
             # Apparent power flow limits on the receiving node
             if optional['LineInfo'][li] == -1 or optional['LineInfo'][li] == 2:
+                # m.addConstr(((fp[li]*fp[li] + fq[li]*fq[li])
+                #              <= M*(lines[li].u*lines[li].u)/(sBase*sBase)),
+                #             name="linecapfw["+str(li)+"]")
+                # Attempting to add slack variable with penalty for soft relaxed lines
                 m.addConstr(((fp[li]*fp[li] + fq[li]*fq[li])
-                             <= M*(lines[li].u*lines[li].u)/(sBase*sBase)),
+                             <= (lines[li].u*lines[li].u)/(sBase*sBase) + fslack[li]),
                             name="linecapfw["+str(li)+"]")
             else:
                 m.addConstr(
@@ -98,11 +108,18 @@ def makeModel(buses, generators, lines, sBase, gensetP, gensetU, conic, **option
                     name="linecapfw["+str(li)+"]")
             # Apparent power flow limits on the sending node
             if optional['LineInfo'][li] == 1 or optional['LineInfo'][li] == 2:
+                # m.addConstr(
+                #     ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
+                #         + (fq[li] - a[li]*lines[li].x)
+                #         * (fq[li] - a[li]*lines[li].x)
+                #         <= M*(lines[li].u*lines[li].u)/(sBase*sBase)),
+                #     name="linecapbw["+str(li)+"]")
+                # Attempting to add slack variable with penalty for soft relaxed lines
                 m.addConstr(
                     ((fp[li] - a[li]*lines[li].r)*(fp[li] - a[li]*lines[li].r)
                         + (fq[li] - a[li]*lines[li].x)
                         * (fq[li] - a[li]*lines[li].x)
-                        <= M*(lines[li].u*lines[li].u)/(sBase*sBase)),
+                        <= (lines[li].u*lines[li].u)/(sBase*sBase) + fslack[li]),
                     name="linecapbw["+str(li)+"]")
             else:
                 m.addConstr(

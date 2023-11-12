@@ -46,10 +46,16 @@ def runpf(testsystem, set_conic, relaxed):
 
     SMP = generators[root].cost[1]
     start_time = datetime.now()
-    status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
-        calculatedlmp(
-            dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic=set_conic, LineInfo=LineState
-            )
+    if relaxed == 1:
+        status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
+            calculatedlmp(
+                dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic=set_conic, LineInfo=LineState
+                )
+    else:
+        status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
+            calculatedlmp(
+                dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic=set_conic
+                )
     # status, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
     #     calculatedlmp(
     #         dispatch_peerG, buses, generators, lines, sBase, SMP, gensetP, gensetU, conic=0

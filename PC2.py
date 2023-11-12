@@ -16,7 +16,7 @@ from time import time
 from gurobipy import GRB
 
 
-def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
+def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing, line_reserve_fix):
     buses, lines, generators, sBase, datamat, ppc = networkload(testsystem)
     windset = {}
     windex = 1
@@ -27,6 +27,12 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         if generators[g].gtype == "Wind":
             windset[windex] = generators[g].gindex
             windex += 1
+
+    # Set line capacity reserve for all lines
+    # e.g., for a line with capacity 2 MW and reserve of 1 kW, up to 1.999 MW of capacity can be allocated to prosumers
+    line_reserve = {}
+    for li in lines:
+        line_reserve[li] = line_reserve_fix
 
     # Note: the root method below only works if gen 1 is slack gen at node 1
     # Currently root was referring to gen index as opposed to root node location
@@ -192,6 +198,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
     dispatch_peerG = {}
     dispatch_peerG_p2p = {}
     dispatch_peerG_p2u = {}
+    cleared_lines = []
     max_penalty_delta = 0
     max_nuc_delta = 0
     min_trade_price = 0
@@ -271,6 +278,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
 
             if status != 2:
                 print("error with select trade")
+                print(cleared_lines, dispatch_stack)
                 return trades, agents, pg_old, pd_old, trades_selected_old, trades_rest_old
 
             accepted[agentID] = temp_accepted
@@ -457,7 +465,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             print("Relaxed Line Model")    
             status2, dlmp, pgextra, NodeInfo, LineInfo, DLMPInfo, GenInfo = \
                 calculatedlmp(dispatch_peerG, buses, generators, lines, sBase,
-                              SMP, gensetP, gensetU, conic=1, LineInfo=LineState)
+                              SMP, gensetP, gensetU, conic=0, LineInfo=LineState)
 
             if status2 != GRB.INFEASIBLE:
                 # Determine which lines were violated and adjust penalty for lines only.
@@ -475,7 +483,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                             LineState[li] = -1
                         elif LineInfo[li]['fp'] < 0:
                             LineState[li] = 1
-
+                print("LineState:", LineState)
                 nodestatus = 0
                 linestatus = sum(abs(LineState[li]) for li in lines)
             else:
@@ -519,13 +527,31 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             trade_congestion_decrease = {}
             agent_congestion_increase = {}
             agent_congestion_decrease = {}
+            # Step 1, determine only most upstream line for congested section to ensure proper application of transaction fees
+            line_violated = {}
+            for li in lines:
+                if LineState[li] != 0:
+                    upstream_congestion = 0
+                    if LineState[li] == -1:
+                        for i in lines[li].ancestor:
+                            if LineState[i] != 0:
+                                upstream_congestion += 1
+                    elif LineState[li] == 1:
+                        for i in lines[li].children:
+                            if LineState[i] != 0:
+                                upstream_congestion += 1
+                    if upstream_congestion == 0:
+                        line_violated[li] = 0
             for w in trades:
                 trade_congestion_increase[w] = 0
                 trade_congestion_decrease[w] = 0
             for a in agents:
                 agent_congestion_increase[a] = 0
                 agent_congestion_decrease[a] = 0
-            for li in lines:
+            print("line_violated:", line_violated)
+            print("cleared_lines:", cleared_lines)
+            for li in line_violated:
+                # if LineState[li] != 0 and (li not in cleared_lines):
                 if LineState[li] != 0:
                     print(li, LineState[li])
                     # print(li, LineState[li], lines[li].fbus, lines[li].tbus, LineInfo[li]['flow'], LineInfo[li]['fp'], LineInfo[li]['fq'])
@@ -662,7 +688,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         # Step 1, check if a set of congested lines has been relieved, confirming no upstream congestion remains for relieved line
         line_limits = {}
         line_loadings = {}
-        line_violations = {}
+        line_relieved = {}
         for li in lines:
             if LineState_old[li] != 0 and LineState[li] == 0:
                 upstream_congestion = 0
@@ -675,9 +701,16 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                         if LineState[i] != 0:
                             upstream_congestion += 1
                 if upstream_congestion == 0:
-                    line_limits[li] = lines[li].u * LineState_old[li]
-                    line_loadings[li] = 0
-                    line_violations[li] = 0
+                    #line_limits[li] = lines[li].u * LineState_old[li]
+                    #line_loadings[li] = 0
+                    line_relieved[li] = 0
+        for li in lines:
+            if LineState_old[li] != 0 or LineState[li] != 0:
+                line_loadings[li] = 0
+                if LineState_old[li] != 0:
+                    line_limits[li] = (lines[li].u-line_reserve[li]) * LineState_old[li]
+                else:
+                    line_limits[li] = (lines[li].u-line_reserve[li]) * LineState[li]
 
         # General process for relieved lines
         # Stable solution shifted from feasible to infeasible after penalty
@@ -685,12 +718,13 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
         # May need to trigger congestion clearing when ANY line clears, rather than all
         # if status == 2 and changestate == 0 and status_old != 2:
         # if changestate == 0 and sum(LineState_old[li] != 0 and LineState[li] == 0 for li in lines):
-        if changestate == 0 and len(line_limits) != 0:
+        if changestate == 0 and len(line_relieved) != 0:
             print("Congestion Clearing")
             
   
-            for li in line_limits:
+            for li in line_relieved:
                 print(li)
+                cleared_lines.append(li)
             # First, accept all P2P trades in the non-violating direction and all cleared P2P trades
             for w in trades_selected_old:
                 if trades[w].cleared == 1:
@@ -701,12 +735,12 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                 else:
                     trade_violating = 0
                     trade_impacting = 0
-                    for li in line_loadings:
+                    for li in line_relieved:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                    agents[trades[w].Ab].location], 4)
                         if wptdf != 0:
                             trade_impacting += 1
-                        if wptdf != 0 and sign(wptdf) == sign(LineState_old[li]):
+                        if wptdf != 0 and sign(wptdf) == sign(line_limits[li]):
                             trade_violating += 1
                     
                     if trade_violating == 0 and trade_impacting != 0:
@@ -731,14 +765,14 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                     trade_violating_gen = 0
                     trade_impacting = 0
                     trade_violating_dem = 0
-                    for li in line_loadings:
+                    for li in line_relieved:
                         wptdfg = round(ptdf[li, agents[a].location, root])
                         wptdfd = round(ptdf[li, root, agents[a].location])
                         if wptdfg !=0 or wptdfd != 0:
                             trade_impacting += 1
-                        if wptdfg != 0 and sign(wptdfg) == sign(LineState_old[li]):
+                        if wptdfg != 0 and sign(wptdfg) == sign(line_limits[li]):
                             trade_violating_gen += 1
-                        if wptdfd != 0 and sign(wptdfd) == sign(LineState_old[li]):
+                        if wptdfd != 0 and sign(wptdfd) == sign(line_limits[li]):
                             trade_violating_dem += 1
 
                     trade_violating_gen = trade_violating_gen * pg_old[a, "pgutility"]
@@ -756,23 +790,30 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                             line_loadings[li] += wptdfg*agents[a].pgutility
                             line_loadings[li] += wptdfd*agents[a].pdutility
                             
-            print(line_loadings)
+            print(line_loadings, line_relieved)
 
             # Accept violating P2P trades while line capacity remains
             for w in trades_selected_old:
                 if trades[w].cleared != 1:
                     trade_violating = 0
                     trade_impacting = 0
-                    for li in line_loadings:
+                    # Determine if trade impacts a relieved line
+                    for li in line_relieved:
                         wptdf = round(ptdf[li, agents[trades[w].As].location,
                                             agents[trades[w].Ab].location], 4)
                         if wptdf != 0:
                             trade_impacting += 1
-                        if wptdf != 0 and sign(wptdf) == sign(LineState_old[li]):
+                    # Determine if trade violates a constrained line limit
+                    for li in line_loadings:
+                        wptdf = round(ptdf[li, agents[trades[w].As].location,
+                                            agents[trades[w].Ab].location], 4)
+                        if wptdf != 0 and sign(wptdf) == sign(line_limits[li]):
+                            wptdf = round(ptdf[li, agents[trades[w].As].location,
+                                            agents[trades[w].Ab].location], 4)
                             print(w, line_loadings[li] + wptdf*trade_scale, wptdf, line_limits[li])
-                            if line_limits[li] > 0 and line_loadings[li] + wptdf*trade_scale >= line_limits[li]:
+                            if line_limits[li] > 0 and round(line_loadings[li] + wptdf*trade_scale, 4) > line_limits[li]:
                                 trade_violating += 1
-                            elif line_limits[li] < 0 and line_loadings[li] + wptdf*trade_scale <= line_limits[li]:
+                            elif line_limits[li] < 0 and round(line_loadings[li] + wptdf*trade_scale, 4) < line_limits[li]:
                                 trade_violating += 1
                     if trade_violating == 0 and trade_impacting != 0:
                         trades[w].cleared = 1
@@ -782,12 +823,12 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                             line_loadings[li] += wptdf*trade_scale
                     elif trade_impacting != 0 and trade_violating != 0:
                         trades[w].blocked = 1
-            print(line_loadings)
+            print(line_loadings, line_relieved)
 
             # Block all non-selected P2P trades impacting congestion
             for w in trades_rest_old:
                 trade_impacting = 0
-                for li in line_loadings:
+                for li in line_relieved:
                     wptdf = round(ptdf[li, agents[trades[w].As].location,
                                         agents[trades[w].Ab].location], 4)
                 
@@ -802,19 +843,7 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
             # agents according to lowest NUC with root
             nuc_agents = []
             for a in agents:
-                agent_impacting = 0
-                for li in line_loadings:
-                    wptdfg = round(ptdf[li, agents[a].location, root])
-                    wptdfd = round(ptdf[li, root, agents[a].location])
-
-                    if wptdfg != 0 or wptdfd != 0:
-                        agent_impacting += 1
-                
-                # if agent_impacting != 0:
-                #     agents[a].utilityfixed = 1
-                #     agents[a].dpenalty -= pen_scale
-                #     agents[a].gpenalty -= pen_scale
-
+                # Sort agents by ascending nuc
                 if len(nuc_agents) == 0:
                     nuc_agents.append(a)
                 else:
@@ -835,25 +864,27 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                     trade_violating_gen = 0
                     trade_violating_dem = 0
                     trade_impacting = 0
-                    for li in line_loadings:
+                    for li in line_relieved:
                         wptdfg = round(ptdf[li, agents[a].location, root])
                         wptdfd = round(ptdf[li, root, agents[a].location])
                         if wptdfg != 0 or wptdfd != 0:
                             trade_impacting += 1
-                        if wptdfg != 0 and sign(wptdfg) == sign(LineState_old[li]) and pg_old[a, "pgutility"] != 0:
+                    for li in line_loadings:
+                        wptdfg = round(ptdf[li, agents[a].location, root])
+                        wptdfd = round(ptdf[li, root, agents[a].location])
+                        if wptdfg != 0 and sign(wptdfg) == sign(line_limits[li]) and pg_old[a, "pgutility"] != 0:
                             trade_violating_gen += 1
-                        if wptdfd != 0 and sign(wptdfd) == sign(LineState_old[li]) and pd_old[a, "pdutility"] != 0:
+                        if wptdfd != 0 and sign(wptdfd) == sign(line_limits[li]) and pd_old[a, "pdutility"] != 0:
                             trade_violating_dem += 1
 
-                    if trade_violating_gen != 0:
+                    if trade_violating_gen != 0 and trade_impacting != 0:
                         trade_allowed = 1000000
                         for li in line_loadings:
                             wptdfg = round(ptdf[li, agents[a].location, root])
                             temp_trade_allowed = 0
-                            if wptdfg != 0 and sign(wptdfg) == sign(LineState_old[li]):
-                                
-                                if pg_old[a, "pgutility"] >= abs(line_limits[li] - line_loadings[li]) - trade_scale:
-                                    temp_trade_allowed = abs(line_limits[li] - line_loadings[li]) - trade_scale
+                            if wptdfg != 0 and sign(wptdfg) == sign(line_limits[li]):
+                                if pg_old[a, "pgutility"] >= abs(line_limits[li] - line_loadings[li]):
+                                    temp_trade_allowed = abs(line_limits[li] - line_loadings[li])
                                 else:
                                     temp_trade_allowed = pg_old[a, "pgutility"]
                                 if temp_trade_allowed < trade_allowed:
@@ -863,15 +894,16 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                         agents[a].gpenalty -= pen_scale
                         agents[a].pgutility = trade_allowed
                         for li in line_loadings:
+                            wptdfg = round(ptdf[li, agents[a].location, root])
                             line_loadings[li] += wptdfg * agents[a].pgutility
-                    if trade_violating_dem != 0:
+                    if trade_violating_dem != 0 and trade_impacting != 0:
                         trade_allowed = 1000000
                         for li in line_loadings:
                             wptdfd = round(ptdf[li, root, agents[a].location])
                             temp_trade_allowed = 0
-                            if wptdfd != 0 and sign(wptdfd) == sign(LineState_old[li]):
-                                if pd_old[a, "pdutility"] >= abs(line_limits[li] - line_loadings[li]) - trade_scale:
-                                    temp_trade_allowed = abs(line_limits[li] - line_loadings[li]) - trade_scale
+                            if wptdfd != 0 and sign(wptdfd) == sign(line_limits[li]):
+                                if pd_old[a, "pdutility"] >= abs(line_limits[li] - line_loadings[li]):
+                                    temp_trade_allowed = abs(line_limits[li] - line_loadings[li])
                                 else:
                                     temp_trade_allowed = pd_old[a, "pdutility"]
                                 if temp_trade_allowed < trade_allowed:
@@ -880,7 +912,10 @@ def pc(testsystem, trade_scale, deltaP, pen_scale, pen_start, clearing):
                         agents[a].dpenalty -= pen_scale
                         agents[a].pdutility = trade_allowed
                         for li in line_loadings:
+                            wptdfd = round(ptdf[li, root, agents[a].location])
                             line_loadings[li] += wptdfd * agents[a].pdutility
+
+            #return trades, agents, pg_old, pd_old, trades_selected_old, trades_rest_old
             # print(line_loadings)
             # if 29 in line_loadings:
             #     return trades, agents, pg_old, pd_old, trades_selected_old, line_loadings

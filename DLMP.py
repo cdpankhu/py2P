@@ -54,7 +54,7 @@ def calculatedlmp(
             linestatus[li] = 0
         NodeInfo = DataFrame([nodestatus], index=['status'])
         LineInfo = DataFrame([linestatus], index=['status'])
-        return status, m, {}, NodeInfo, LineInfo, {}, {}
+        return status, {}, m, NodeInfo, LineInfo, {}, {}
 
     var = m.getVars()
     # Getting constraint duals
@@ -145,7 +145,7 @@ def calculatedlmp(
     GenInfo = DataFrame([pg, qg, ocgen], index=['pg', 'qg', 'ocgen'])
 
     if ('LineInfo' in optional) or ('NodeInfo' in optional) or conic != 1:
-        return status, {}, pg, NodeInfo, LineInfo, {}, GenInfo
+        return status, {}, m, NodeInfo, LineInfo, {}, GenInfo
     
 
     # Getting quadratic constraint duals
